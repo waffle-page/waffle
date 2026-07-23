@@ -9,6 +9,8 @@ export interface LibraryItem {
   tags?: string[];
   /** note/file/dash: vault-relative path · link: the carrier `.url` file's path (URL lives in the `url` property). Null for non-vault rows. */
   contentRef?: string | null;
+  /** ISO file/index modification time; used by built-in sort/group projections. */
+  updatedAt?: string;
   /** Thumbnail pipeline outputs (ADR-012): all null until generated. */
   thumbRef?: string | null;
   thumbColor?: string | null;
@@ -39,12 +41,18 @@ export interface TableColumnConfig {
   width: number;
 }
 
+/** One persisted grouping rule; direction orders buckets, not rows inside them. */
+export interface GroupByConfig {
+  key: string;
+  dir: 'asc' | 'desc';
+}
+
 /** Table-layout slice of a view's persisted config (docs/12). */
 export interface TableViewConfig {
   /** Property-column order + width; data keys not listed append at the default width. */
   columns?: TableColumnConfig[];
   /** The VIEW's sort ($updated/$title/property key) — the table renders carets and patches it on header click. */
   sort?: { key: string; dir: 'asc' | 'desc' } | null;
-  /** Property key whose values become section headers. */
-  groupBy?: string | null;
+  /** Field whose values become ordered section headers. */
+  groupBy?: GroupByConfig | null;
 }

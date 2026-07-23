@@ -70,8 +70,8 @@ export interface Folder {
 // and the Obsidian sync.
 
 export type FilterNode =
-  | { op: 'and' | 'or'; children: FilterNode[] }
-  | { op: 'cmp'; key: string; cmp: 'eq' | 'ne' | 'lt' | 'lte' | 'gt' | 'gte' | 'contains' | 'tagged'; value: unknown };
+  | { op: 'and' | 'or' | 'not'; children: FilterNode[] }
+  | { op: 'cmp'; key: string; cmp: 'eq' | 'ne' | 'lt' | 'lte' | 'gt' | 'gte' | 'contains' | 'tagged' | 'inFolder'; value: unknown };
 
 // ── Dashboards ───────────────────────────────────────────────────────────────
 

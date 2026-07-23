@@ -54,7 +54,7 @@ function canAuthorProperty(row: TableRowData, key: string): boolean {
   return row.editable && row.props[key]?.kind !== 'unsupported';
 }
 
-function TableLayout({ items, groups, folderId = null, onOpen, onMutated, tableConfig, onTableConfig }: LayoutProps) {
+function TableLayout({ items, groups, folderId = null, crossFolder = false, onOpen, onMutated, tableConfig, onTableConfig }: LayoutProps) {
   const [propMap, setPropMap] = useState<PropMap | null>(null);
   const [types, setTypes] = useState<PropertyTypes>({});
   const [dir, setDir] = useState<string | null>(null);
@@ -73,7 +73,7 @@ function TableLayout({ items, groups, folderId = null, onOpen, onMutated, tableC
     let dead = false;
     void (async () => {
       const fs = await getVaultFs();
-      const [map, t, d] = await Promise.all([loadPropertyMap(folderId), loadPropertyTypes(fs), vaultDirFor(folderId)]);
+      const [map, t, d] = await Promise.all([loadPropertyMap(crossFolder ? null : folderId), loadPropertyTypes(fs), vaultDirFor(folderId)]);
       if (dead) return;
       // A refresh caused by an earlier write must not replace newer optimistic
       // patches. The last outstanding mutation performs the canonical reload.
@@ -84,7 +84,7 @@ function TableLayout({ items, groups, folderId = null, onOpen, onMutated, tableC
     return () => {
       dead = true;
     };
-  }, [folderId, items]);
+  }, [folderId, crossFolder, items]);
 
   const columns = useMemo<TableColumn[]>(() => {
     if (!propMap) return [];

@@ -20,10 +20,10 @@ A **local-first everything-library**. Folders hold **toppings** — notes, links
 - Per-entity **status + ratings** (multi-axis slots) with the link detail view.
 - **Paste/drop images** into notes (vault files + `![[…]]` embeds); a note's first embedded image becomes its card thumbnail.
 - **Soft delete** to `.trash/` (ADR-021) from table selection and the editor.
-- **Bidirectional Obsidian config sync** (ADR-020): `types.json` and `.base` files sync at every scan; editing a derived view in Waffle writes back into the `.base` via comment-preserving YAML surgery; inexpressible states freeze safely, and the sync report names every compromise.
+- **Bidirectional Obsidian config sync** (ADR-020): `types.json` and `.base` files sync at every scan; table/cards/list views, directional grouping, recursive negation, and representable `file.*` predicates round-trip through comment-preserving YAML surgery; inexpressible states freeze safely.
 
-**Next** (working agreements in [CLAUDE.md](CLAUDE.md)): current Obsidian Bases
-parity (`groupBy`, list views, NOT, common `file.*` fields), then table
+**Next** (working agreements in [CLAUDE.md](CLAUDE.md)): simplify the three
+large UI orchestrators around their actual mutation/view seams, then table
 interaction slice C — in-memory session undo/redo for property writes and soft
 deletes — and the P1 remainder.
 Phase ladder: `docs/04-phases.md`.

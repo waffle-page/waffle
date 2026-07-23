@@ -15,7 +15,8 @@
 import { parse as parseYaml } from 'yaml';
 import { loadPropertyTypes, savePropertyTypes, type PropertyTypeDecl, type PropertyTypes, type SqlDriver, type VaultFs, type FilterNode } from '@waffle/core';
 import { normalizeTableColumnWidth } from '@waffle/ui';
-import { createView, deleteView, listViews, saveViewState, type FolderView, type ViewCfg } from '../library/queries';
+import { createView, deleteView, inFolderFilter, listViews, moveViewToFolder, saveViewState, type FolderView, type ViewCfg } from '../library/queries';
+import { basesKeyToWaffle, parseFilterBlock, parseGroupBy, stripNote } from './basesCompatibility';
 
 const OBSIDIAN_KIND: Record<string, PropertyTypeDecl['kind'] | undefined> = {
   text: 'text',
@@ -25,9 +26,6 @@ const OBSIDIAN_KIND: Record<string, PropertyTypeDecl['kind'] | undefined> = {
   datetime: 'date',
   multitext: 'list',
 };
-
-const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
-const CMP: Record<string, 'eq' | 'ne' | 'lt' | 'lte' | 'gt' | 'gte'> = { '==': 'eq', '!=': 'ne', '<': 'lt', '<=': 'lte', '>': 'gt', '>=': 'gte' };
 
 export interface SyncResult {
   found: { typesFile: boolean; baseFiles: number };
@@ -69,15 +67,27 @@ export async function syncObsidian(fs: VaultFs, db: SqlDriver): Promise<SyncResu
     // no types.json — fine
   }
   // ── *.base files (already indexed as file toppings by the scanner) ──
-  const baseRows = await db.exec<{ content_ref: string; folder_id: string; folder_name: string }>(
-    `SELECT t.content_ref, t.folder_id, f.name AS folder_name FROM toppings t JOIN folders f ON f.id = t.folder_id
+  const baseRows = await db.exec<{ content_ref: string }>(
+    `SELECT t.content_ref FROM toppings t
      WHERE t.source = 'vault' AND t.deleted_at IS NULL AND t.content_ref LIKE '%.base' ORDER BY t.content_ref`,
   );
   result.found.baseFiles = baseRows.length;
   const mergedKinds = await loadPropertyTypes(fs); // includes the just-added keys
 
-  interface Desired { folderId: string; folderName: string; base: string; view: string; name: string; layout: string; cfg: ViewCfg; spec: string }
+  interface Desired { folderId: string | null; folderName: string; base: string; view: string; name: string; layout: string; cfg: ViewCfg; spec: string }
   const desired = new Map<string, Desired>();
+  const parsedBases = new Set<string>();
+  const seenOrigins = new Set<string>();
+  const presentBases = new Set(baseRows.map((row) => row.content_ref));
+  const folderScopes = new Map<string, { id: string; name: string } | null>();
+  const resolveFolderScope = async (scope: string): Promise<{ id: string; name: string } | null> => {
+    const normalized = scope.replace(/^\/+|\/+$/g, '');
+    if (folderScopes.has(normalized)) return folderScopes.get(normalized) ?? null;
+    const target = await db.exec<{ id: string; name: string }>(`SELECT id, name FROM folders WHERE path = ? LIMIT 1`, ['/' + normalized]);
+    const resolved = target[0] ?? null;
+    folderScopes.set(normalized, resolved);
+    return resolved;
+  };
 
   for (const row of baseRows) {
     let doc: BaseFile;
@@ -87,26 +97,70 @@ export async function syncObsidian(fs: VaultFs, db: SqlDriver): Promise<SyncResu
       result.notes.push(`${row.content_ref}: unparseable YAML (${e instanceof Error ? e.message : 'error'})`);
       continue;
     }
+    parsedBases.add(row.content_ref);
     const fileNotes: string[] = [];
     if (doc.formulas) fileNotes.push('formulas are not imported');
-
-    const baseFilter = parseFilterBlock(doc.filters, mergedKinds, fileNotes);
-    let folderId = row.folder_id;
-    let folderName = row.folder_name === '/' ? 'Vault' : row.folder_name;
-    const folderOverride = extractInFolder(doc.filters);
-    if (folderOverride) {
-      const target = await db.exec<{ id: string; name: string }>(`SELECT id, name FROM folders WHERE name = ? LIMIT 1`, [folderOverride]);
-      if (target[0]) {
-        folderId = target[0].id;
-        folderName = target[0].name;
-      } else fileNotes.push(`file.inFolder("${folderOverride}"): no such folder — using the .base file's own folder`);
+    if (doc.views !== undefined && !Array.isArray(doc.views)) {
+      result.notes.push(`${row.content_ref}: views is not a list — existing projections frozen`);
+      parsedBases.delete(row.content_ref);
+      continue;
     }
 
-    for (const v of doc.views ?? []) {
-      const planned = planViewImport(v, baseFilter, mergedKinds);
+    const baseFilter = parseFilterBlock(doc.filters, mergedKinds, fileNotes);
+    // Bases are vault-global unless a positive file.inFolder predicate narrows
+    // them. Waffle stores that global projection under Everything.
+    let folderId: string | null = null;
+    let folderName = 'Everything';
+    const folderOverride = inFolderFilter(baseFilter.node);
+    if (folderOverride) {
+      const target = await resolveFolderScope(folderOverride);
+      if (target) {
+        folderId = target.id;
+        folderName = target.name;
+      } else fileNotes.push(`file.inFolder("${folderOverride}"): no such folder — projection stays under Everything`);
+    }
+
+    for (const rawView of doc.views ?? []) {
+      if (!rawView || typeof rawView !== 'object' || Array.isArray(rawView)) {
+        fileNotes.push('non-object view entry skipped');
+        parsedBases.delete(row.content_ref);
+        continue;
+      }
+      const v = rawView as BaseView;
+      const viewName = typeof v.name === 'string' && v.name.trim() ? v.name.trim() : 'Imported view';
+      const originKey = `${row.content_ref}#${viewName}`;
+      if (seenOrigins.has(originKey)) {
+        desired.delete(originKey);
+        fileNotes.push(`${viewName}: duplicate view name — projections frozen`);
+        continue;
+      }
+      seenOrigins.add(originKey);
+      if (!baseFilter.supported) {
+        fileNotes.push(`${viewName}: shared filters are unsupported — view frozen`);
+        continue;
+      }
+      const planned = planViewImport(v, baseFilter.node, mergedKinds);
+      if (!planned.supported) {
+        for (const note of planned.notes) fileNotes.push(`${viewName}: ${note}`);
+        fileNotes.push(`${viewName}: unsupported state — view frozen`);
+        continue;
+      }
       const spec = specOf(planned.layout, planned.cfg);
-      const viewName = planned.name;
-      desired.set(`${row.content_ref}#${viewName}`, { folderId, folderName, base: row.content_ref, view: viewName, name: viewName, layout: planned.layout, cfg: planned.cfg, spec });
+      let viewFolderId = folderId;
+      let viewFolderName = folderName;
+      const viewScope = inFolderFilter(planned.cfg.filters);
+      if (viewScope && viewScope !== folderOverride) {
+        const target = await resolveFolderScope(viewScope);
+        if (target) {
+          viewFolderId = target.id;
+          viewFolderName = target.name;
+        } else {
+          fileNotes.push(`${viewName}: file.inFolder("${viewScope}") has no matching folder — projection stays under Everything`);
+          viewFolderId = null;
+          viewFolderName = 'Everything';
+        }
+      }
+      desired.set(originKey, { folderId: viewFolderId, folderName: viewFolderName, base: row.content_ref, view: viewName, name: viewName, layout: planned.layout, cfg: planned.cfg, spec });
       for (const n of planned.notes) fileNotes.push(`${viewName}: ${n}`);
     }
     for (const n of fileNotes) result.notes.push(`${row.content_ref}: ${n}`);
@@ -122,53 +176,68 @@ export async function syncObsidian(fs: VaultFs, db: SqlDriver): Promise<SyncResu
   // future watcher) serialize here, so the second pass SEES the first's writes
   // and skips instead of duplicating.
   await db.transaction(async () => {
-  for (const folderId of folderIds) {
-    const views = await listViews(folderId);
-    const here = [...desired.values()].filter((d) => d.folderId === folderId);
+    const viewsByFolder = new Map<string | null, FolderView[]>();
+    for (const folderId of folderIds) viewsByFolder.set(folderId, await listViews(folderId));
+    const allViews = [...viewsByFolder.values()].flat();
+    for (const folderId of folderIds) {
+      const views = viewsByFolder.get(folderId) ?? [];
+      const here = [...desired.values()].filter((d) => d.folderId === folderId);
 
-    for (const d of here) {
-      const matches = views.filter((v) => v.cfg.origin?.base === d.base && v.cfg.origin.view === d.view);
-      // Self-heal duplicates (e.g. from a pre-transaction race): keep the first,
-      // remove untouched extras.
-      for (const extra of matches.slice(1)) {
-        if (specOf(extra.layout, extra.cfg) === extra.cfg.origin!.spec) {
-          await deleteView(extra.id);
-          result.viewsRemoved.push({ folder: d.base, name: `${extra.name} (duplicate)` });
+      for (const d of here) {
+        const matches = allViews.filter((v) => v.cfg.origin?.base === d.base && v.cfg.origin.view === d.view);
+        // Self-heal duplicates (e.g. from a pre-transaction race): keep the
+        // first and remove untouched extras.
+        for (const extra of matches.slice(1)) {
+          if (specOf(extra.layout, extra.cfg) === extra.cfg.origin!.spec) {
+            await deleteView(extra.id);
+            result.viewsRemoved.push({ folder: d.base, name: `${extra.name} (duplicate)` });
+          }
         }
-      }
-      const match = matches[0];
-      if (!match) {
-        if (views.some((v) => !v.cfg.origin && v.name === d.name)) {
-          result.notes.push(`${d.base}: view "${d.name}" skipped — a Waffle view with that name already exists in ${d.folderName}`);
+        const match = matches[0];
+        if (!match) {
+          if (views.some((v) => !v.cfg.origin && v.name === d.name)) {
+            result.notes.push(`${d.base}: view "${d.name}" skipped — a Waffle view with that name already exists in ${d.folderName}`);
+            continue;
+          }
+          const created = await createView(folderId, d.name);
+          await saveViewState(created.id, d.layout, { ...d.cfg, origin: { base: d.base, view: d.view, spec: d.spec } });
+          result.viewsCreated.push({ folder: d.folderName, name: d.name });
           continue;
         }
-        const created = await createView(folderId, d.name);
-        await saveViewState(created.id, d.layout, { ...d.cfg, origin: { base: d.base, view: d.view, spec: d.spec } });
-        result.viewsCreated.push({ folder: d.folderName, name: d.name });
-        continue;
+        const untouched = specOf(match.layout, match.cfg) === match.cfg.origin!.spec;
+        if (!untouched) {
+          if (match.cfg.origin!.spec !== d.spec) result.viewsDiverged.push({ folder: d.folderName, name: match.name });
+          continue;
+        }
+        const currentFolder = [...viewsByFolder.entries()].find(([, candidates]) => candidates.some((view) => view.id === match.id))?.[0] ?? null;
+        if (currentFolder !== folderId) {
+          if (views.some((view) => view.id !== match.id && !view.cfg.origin && view.name === d.name)) {
+            result.notes.push(`${d.base}: view "${d.name}" cannot move to ${d.folderName} — a Waffle view already has that name`);
+            continue;
+          }
+          await moveViewToFolder(match.id, folderId);
+        }
+        if (currentFolder !== folderId || match.cfg.origin!.spec !== d.spec) {
+          await saveViewState(match.id, d.layout, { ...d.cfg, origin: { base: d.base, view: d.view, spec: d.spec } });
+          result.viewsUpdated.push({ folder: d.folderName, name: match.name });
+        }
       }
-      const untouched = specOf(match.layout, match.cfg) === match.cfg.origin!.spec;
-      if (!untouched) {
-        if (match.cfg.origin!.spec !== d.spec) result.viewsDiverged.push({ folder: d.folderName, name: match.name });
-        continue;
-      }
-      if (match.cfg.origin!.spec !== d.spec) {
-        // Waffle-side fields (groupBy) survive base-driven updates.
-        await saveViewState(match.id, d.layout, { ...d.cfg, groupBy: match.cfg.groupBy, origin: { base: d.base, view: d.view, spec: d.spec } });
-        result.viewsUpdated.push({ folder: d.folderName, name: match.name });
-      }
-    }
 
-    // Orphans: derived here, base/view gone, still untouched → remove.
-    for (const v of views) {
-      if (!v.cfg.origin) continue;
-      if (desired.has(`${v.cfg.origin.base}#${v.cfg.origin.view}`)) continue;
-      if (specOf(v.layout, v.cfg) === v.cfg.origin.spec) {
-        await deleteView(v.id);
-        result.viewsRemoved.push({ folder: v.cfg.origin.base, name: v.name });
+      // Orphans: derived here, base/view gone, still untouched → remove.
+      for (const v of views) {
+        if (!v.cfg.origin) continue;
+        const originKey = `${v.cfg.origin.base}#${v.cfg.origin.view}`;
+        if (desired.has(originKey) || seenOrigins.has(originKey)) continue;
+        // Unparseable and unsupported bases freeze their projections. Remove
+        // only when the file is gone, or a successfully parsed base truly no
+        // longer contains the view.
+        if (presentBases.has(v.cfg.origin.base) && !parsedBases.has(v.cfg.origin.base)) continue;
+        if (specOf(v.layout, v.cfg) === v.cfg.origin.spec) {
+          await deleteView(v.id);
+          result.viewsRemoved.push({ folder: v.cfg.origin.base, name: v.name });
+        }
       }
     }
-  }
   });
 
   return result;
@@ -176,12 +245,11 @@ export async function syncObsidian(fs: VaultFs, db: SqlDriver): Promise<SyncResu
 
 /**
  * Canonical spec of a view's SYNCED state — origin excluded, key order fixed by
- * construction. groupBy is deliberately absent: Bases can't express it, so it
- * is a Waffle-side field that neither marks divergence nor writes back
- * (ADR-018 field ownership, per field).
+ * construction. Every field here has a symmetric write-back spelling; adding
+ * an import-only field would make ownership detection lie.
  */
 export function specOf(layout: string, cfg: ViewCfg): string {
-  return JSON.stringify({ layout, sort: cfg.sort, filters: cfg.filters, columns: cfg.columns ?? null });
+  return JSON.stringify({ layout, sort: cfg.sort, filters: cfg.filters, groupBy: cfg.groupBy, columns: cfg.columns ?? null });
 }
 
 /**
@@ -203,23 +271,26 @@ export async function reimportView(
   }
   const skips: string[] = [];
   const baseFilter = parseFilterBlock(doc.filters, kinds, skips);
-  const baseChildren = baseFilter ? (baseFilter.op === 'and' ? baseFilter.children : [baseFilter]) : [];
-  const v = (doc.views ?? []).find((view) => (view.name?.trim() || 'Imported view') === viewName);
+  if (!baseFilter.supported) return null;
+  const baseChildren = baseFilter.node ? (baseFilter.node.op === 'and' ? baseFilter.node.children : [baseFilter.node]) : [];
+  const v = (Array.isArray(doc.views) ? doc.views : []).find((view) => (typeof view.name === 'string' && view.name.trim() ? view.name.trim() : 'Imported view') === viewName);
   if (!v) return null;
-  const planned = planViewImport(v, baseFilter, kinds);
+  const planned = planViewImport(v, baseFilter.node, kinds);
+  if (!planned.supported) return null;
   return { layout: planned.layout, cfg: planned.cfg, baseChildren };
 }
 
 // ── Bases parsing (the documented subset) ────────────────────────────────────
 
 interface BaseView {
-  type?: string;
-  name?: string;
+  type?: unknown;
+  name?: unknown;
   filters?: unknown;
-  order?: string[];
-  sort?: Array<{ property?: string; direction?: string }>;
-  limit?: number;
-  columnSize?: Record<string, number>;
+  order?: unknown;
+  sort?: unknown;
+  limit?: unknown;
+  columnSize?: unknown;
+  groupBy?: unknown;
 }
 interface BaseFile {
   filters?: unknown;
@@ -228,113 +299,104 @@ interface BaseFile {
   views?: BaseView[];
 }
 
-function planViewImport(v: BaseView, baseFilter: FilterNode | null, kinds: PropertyTypes): { name: string; layout: string; cfg: ViewCfg; notes: string[] } {
+function planViewImport(v: BaseView, baseFilter: FilterNode | null, kinds: PropertyTypes): { name: string; layout: string; cfg: ViewCfg; notes: string[]; supported: boolean } {
   const notes: string[] = [];
-  const layout = v.type === 'table' ? 'table' : v.type === 'cards' ? 'grid' : 'masonry';
-  if (v.type && v.type !== 'table' && v.type !== 'cards') notes.push(`view type "${v.type}" → masonry`);
-  if (v.limit) notes.push(`limit ${v.limit} ignored (views are unbounded here)`);
+  const layout = v.type === 'table' ? 'table' : v.type === 'cards' ? 'grid' : v.type === 'list' ? 'list' : 'masonry';
+  let supported = v.type === 'table' || v.type === 'cards' || v.type === 'list';
+  if (!supported) notes.push(`view type "${String(v.type)}" is unsupported`);
+  const ownedKeys = new Set(['type', 'name', 'filters', 'order', 'sort', 'groupBy', 'columnSize', 'limit']);
+  const extraKeys = Object.keys(v).filter((key) => !ownedKeys.has(key));
+  if (extraKeys.length) {
+    notes.push(`view settings ${extraKeys.join(', ')} are unsupported`);
+    supported = false;
+  }
+  if (v.limit !== undefined) {
+    notes.push(`limit ${v.limit} is unsupported`);
+    supported = false;
+  }
 
   const own = parseFilterBlock(v.filters, kinds, notes);
-  const children = [...(baseFilter?.op === 'and' ? baseFilter.children : baseFilter ? [baseFilter] : []), ...(own?.op === 'and' ? own.children : own ? [own] : [])];
+  supported &&= own.supported;
+  const children = [...(baseFilter?.op === 'and' ? baseFilter.children : baseFilter ? [baseFilter] : []), ...(own.node?.op === 'and' ? own.node.children : own.node ? [own.node] : [])];
   const filters: FilterNode | null = children.length ? { op: 'and', children } : null;
 
-  const columns = (v.order ?? []).flatMap((rawKey) => {
+  const order = v.order === undefined
+    ? []
+    : Array.isArray(v.order) && v.order.every((key) => typeof key === 'string')
+      ? v.order as string[]
+      : [];
+  if (v.order !== undefined && order !== v.order) {
+    notes.push('order must be a list of property names');
+    supported = false;
+  }
+  const validColumnSize =
+    v.columnSize !== undefined &&
+    !!v.columnSize &&
+    typeof v.columnSize === 'object' &&
+    !Array.isArray(v.columnSize) &&
+    Object.values(v.columnSize).every((width) => typeof width === 'number' && Number.isFinite(width));
+  if (v.columnSize !== undefined && !validColumnSize) {
+    notes.push('columnSize must contain only finite numeric widths');
+    supported = false;
+  }
+  const columnSize = validColumnSize ? v.columnSize as Record<string, number> : undefined;
+  const columns = order.flatMap((rawKey) => {
     if (rawKey === 'file.name') return []; // the built-in fixed-width title column
     if (rawKey.startsWith('file.')) {
-      notes.push(`column ${rawKey} skipped (no such built-in yet)`);
+      notes.push(`column ${rawKey} is unsupported`);
+      supported = false;
+      return [];
+    }
+    if (rawKey.startsWith('formula.')) {
+      notes.push(`column ${rawKey} is unsupported`);
+      supported = false;
       return [];
     }
     const key = stripNote(rawKey);
-    const width = normalizeTableColumnWidth(v.columnSize?.[`note.${key}`] ?? v.columnSize?.[rawKey] ?? v.columnSize?.[key]);
+    const width = normalizeTableColumnWidth(columnSize?.[`note.${key}`] ?? columnSize?.[rawKey] ?? columnSize?.[key]);
     return [{ key, width }];
   });
 
   let sort: ViewCfg['sort'] = { key: '$updated', dir: 'desc' };
-  const first = v.sort?.[0];
-  if (first?.property) {
-    const key = first.property === 'file.name' ? '$title' : first.property.startsWith('file.') ? null : stripNote(first.property);
-    if (key) sort = { key, dir: first.direction?.toUpperCase() === 'DESC' ? 'desc' : 'asc' };
-    else notes.push(`sort by ${first.property} unsupported — recency used`);
+  const sortRows = v.sort === undefined
+    ? []
+    : Array.isArray(v.sort) && v.sort.every((entry) => entry && typeof entry === 'object' && !Array.isArray(entry))
+      ? v.sort as Array<Record<string, unknown>>
+      : [];
+  if (v.sort !== undefined && sortRows !== v.sort) {
+    notes.push('sort must be a list of sort rules');
+    supported = false;
   }
-  if ((v.sort?.length ?? 0) > 1) notes.push('only the first sort level imports');
+  const first = sortRows[0];
+  if (first) {
+    if (typeof first.property !== 'string') {
+      notes.push('sort property is missing');
+      supported = false;
+    }
+    const key = typeof first.property === 'string' ? basesKeyToWaffle(first.property) : null;
+    const direction = first.direction === undefined
+      ? 'ASC'
+      : typeof first.direction === 'string'
+        ? first.direction.toUpperCase()
+        : '';
+    if (direction !== 'ASC' && direction !== 'DESC') {
+      notes.push(`sort direction "${String(first.direction)}" is unsupported`);
+      supported = false;
+    } else if (key && key !== '$ext' && key !== '$name') {
+      sort = { key, dir: direction === 'DESC' ? 'desc' : 'asc' };
+    } else if (typeof first.property === 'string') {
+      notes.push(`sort by ${String(first.property)} is unsupported`);
+      supported = false;
+    }
+  }
+  if (sortRows.length > 1) {
+    notes.push('multiple sort levels are unsupported');
+    supported = false;
+  }
 
-  const cfg: ViewCfg = { sort, filters, groupBy: null };
+  const group = parseGroupBy(v.groupBy, notes);
+  supported &&= group.supported;
+  const cfg: ViewCfg = { sort, filters, groupBy: group.groupBy };
   if (columns.length) cfg.columns = columns;
-  return { name: v.name?.trim() || 'Imported view', layout, cfg, notes };
-}
-
-/** Obsidian `and:`/`or:` blocks of expression strings → FilterNode (skips reported). */
-function parseFilterBlock(block: unknown, kinds: PropertyTypes, skips: string[]): FilterNode | null {
-  if (!block) return null;
-  if (typeof block === 'string') return parseExpr(block, kinds, skips);
-  if (typeof block !== 'object') return null;
-  const rec = block as Record<string, unknown>;
-  for (const op of ['and', 'or'] as const) {
-    if (Array.isArray(rec[op])) {
-      const children = (rec[op] as unknown[]).map((c) => parseFilterBlock(c, kinds, skips)).filter((c): c is FilterNode => c !== null);
-      return children.length ? { op, children } : null;
-    }
-  }
-  if (rec.not) {
-    skips.push('`not:` blocks are not supported yet');
-    return null;
-  }
-  return null;
-}
-
-function parseExpr(src: string, kinds: PropertyTypes, skips: string[]): FilterNode | null {
-  const s = src.trim();
-  if (s.startsWith('!')) {
-    skips.push(`negated filter skipped: ${s}`);
-    return null;
-  }
-  if (/^file\.inFolder\(/.test(s) || /^file\.ext\s*==/.test(s)) return null; // handled/implicit elsewhere
-  let m = /^file\.hasTag\(\s*"([^"]+)"\s*\)$/.exec(s);
-  if (m) return { op: 'cmp', key: '$tag', cmp: 'tagged', value: m[1]! };
-  m = /^([\w.]+)\.contains\(\s*"([^"]+)"\s*\)$/.exec(s);
-  if (m) return { op: 'cmp', key: propKey(m[1]!), cmp: 'contains', value: m[2]! };
-  m = /^([\w.]+)\s*(==|!=|>=|<=|>|<)\s*(.+)$/.exec(s);
-  if (m) {
-    const rawKey = m[1]!;
-    if (rawKey.startsWith('file.') && rawKey !== 'file.name') {
-      skips.push(`filter on ${rawKey} skipped (no such built-in yet)`);
-      return null;
-    }
-    const key = rawKey === 'file.name' ? '$title' : propKey(rawKey);
-    return { op: 'cmp', key, cmp: CMP[m[2]!]!, value: literal(m[3]!, kinds[key]?.kind) };
-  }
-  skips.push(`unsupported filter skipped: ${s}`);
-  return null;
-}
-
-const stripNote = (key: string): string => (key.startsWith('note.') ? key.slice(5) : key);
-const propKey = stripNote;
-
-/** Quoted → string · true/false → boolean · numeric → number · ISO date on a date key → ms (matches value_num). */
-function literal(raw: string, kind: PropertyTypeDecl['kind'] | undefined): string | number | boolean {
-  const s = raw.trim();
-  const quoted = /^"(.*)"$/.exec(s) ?? /^'(.*)'$/.exec(s);
-  if (quoted) {
-    const text = quoted[1]!;
-    if (kind === 'date' && ISO_DATE.test(text)) return Date.parse(text);
-    return text;
-  }
-  if (s === 'true') return true;
-  if (s === 'false') return false;
-  if (!Number.isNaN(Number(s))) return Number(s);
-  if (kind === 'date' && ISO_DATE.test(s)) return Date.parse(s);
-  return s;
-}
-
-function extractInFolder(block: unknown): string | null {
-  if (typeof block === 'string') return /^file\.inFolder\(\s*"([^"]+)"\s*\)$/.exec(block.trim())?.[1] ?? null;
-  if (block && typeof block === 'object') {
-    for (const value of Object.values(block as Record<string, unknown>)) {
-      if (Array.isArray(value)) for (const c of value) {
-        const hit = extractInFolder(c);
-        if (hit) return hit;
-      }
-    }
-  }
-  return null;
+  return { name: typeof v.name === 'string' && v.name.trim() ? v.name.trim() : 'Imported view', layout, cfg, notes, supported };
 }

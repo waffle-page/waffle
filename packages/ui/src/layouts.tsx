@@ -25,6 +25,8 @@ export interface LayoutProps {
   // Editing-capable layouts (table) additionally get folder context. Pure
   // renderers ignore these; the shape stays one for every registry entry.
   folderId?: string | null;
+  /** The active filter intentionally spans a folder subtree; folder-local data loaders must widen. */
+  crossFolder?: boolean;
   /** Call after any layout-initiated write so the host refreshes its rows. */
   onMutated?: () => void | Promise<void>;
   tableConfig?: TableViewConfig;

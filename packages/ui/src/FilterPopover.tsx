@@ -6,8 +6,9 @@
  */
 import { useState, type CSSProperties } from 'react';
 import type { PropertyValue } from '@waffle/core';
+import type { GroupByConfig } from './types';
 
-/** '$title' | '$type' | '$tag' | property key. */
+/** Built-in `$…` field or frontmatter property key. */
 export interface FilterField {
   key: string;
   kind: PropertyValue['kind'] | 'title' | 'type' | 'tag';
@@ -22,12 +23,14 @@ export interface FilterCondition {
 export interface FilterPopoverProps {
   fields: FilterField[];
   conditions: FilterCondition[];
-  groupBy: string | null;
+  /** Complex imported filter trees stay active but are not flattened into this v1 editor. */
+  filtersReadOnly?: boolean;
+  groupBy: GroupByConfig | null;
   /** Property keys offered for grouping (select/text/checkbox/number make sense; host decides). */
   groupChoices: string[];
   /** false ⇒ the active layout can't render sections; the group control is hidden, not ignored. */
   showGroupBy?: boolean;
-  onApply: (conditions: FilterCondition[], groupBy: string | null) => void;
+  onApply: (conditions: FilterCondition[], groupBy: GroupByConfig | null) => void;
   onClose: () => void;
 }
 
@@ -74,11 +77,11 @@ interface DraftRow {
 
 const ctl: CSSProperties = { background: 'var(--surface)', color: 'var(--text)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '0.25rem 0.45rem', fontSize: '0.8rem' };
 
-export function FilterPopover({ fields, conditions, groupBy, groupChoices, showGroupBy = true, onApply, onClose }: FilterPopoverProps) {
+export function FilterPopover({ fields, conditions, filtersReadOnly = false, groupBy, groupChoices, showGroupBy = true, onApply, onClose }: FilterPopoverProps) {
   const [rows, setRows] = useState<DraftRow[]>(() =>
     conditions.map((c) => ({ key: c.key, cmp: c.cmp, raw: rawValue(fields.find((f) => f.key === c.key)?.kind ?? 'text', c.value) })),
   );
-  const [group, setGroup] = useState<string | null>(groupBy);
+  const [group, setGroup] = useState<GroupByConfig | null>(groupBy);
 
   const fieldFor = (key: string): FilterField => fields.find((f) => f.key === key) ?? { key, kind: 'text' };
 
@@ -97,8 +100,13 @@ export function FilterPopover({ fields, conditions, groupBy, groupChoices, showG
   return (
     <div style={{ position: 'absolute', top: '100%', right: 8, zIndex: 6, display: 'flex', flexDirection: 'column', gap: 8, width: 430, maxWidth: '90vw', padding: '0.75rem', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', boxShadow: '0 8px 24px rgba(0,0,0,0.18)' }}>
       <strong style={{ fontSize: '0.82rem' }}>Filter</strong>
-      {rows.length === 0 && <span style={{ fontSize: '0.78rem', color: 'var(--text-dim)' }}>No conditions — showing everything.</span>}
-      {rows.map((r, i) => {
+      {filtersReadOnly && (
+        <span style={{ fontSize: '0.78rem', color: 'var(--text-dim)' }}>
+          This imported view uses nested filters. They remain active and sync safely; edit them in Obsidian.
+        </span>
+      )}
+      {!filtersReadOnly && rows.length === 0 && <span style={{ fontSize: '0.78rem', color: 'var(--text-dim)' }}>No conditions — showing everything.</span>}
+      {!filtersReadOnly && rows.map((r, i) => {
         const kind = fieldFor(r.key).kind;
         const ops = OPS[kind] ?? OPS.text!;
         return (
@@ -138,20 +146,30 @@ export function FilterPopover({ fields, conditions, groupBy, groupChoices, showG
           </div>
         );
       })}
-      <div>
+      {!filtersReadOnly && <div>
         <button onClick={() => setRows((prev) => [...prev, { key: fields[0]!.key, cmp: (OPS[fields[0]!.kind] ?? OPS.text!)[0]!.cmp, raw: '' }])} style={{ ...ctl, cursor: 'pointer' }}>
           + condition
         </button>
-      </div>
+      </div>}
       {showGroupBy && (
         <div style={{ display: 'flex', gap: 6, alignItems: 'center', borderTop: '1px solid var(--border)', paddingTop: 8 }}>
           <span style={{ fontSize: '0.8rem', color: 'var(--text-dim)' }}>Group by</span>
-          <select value={group ?? ''} onChange={(e) => setGroup(e.target.value || null)} style={{ ...ctl, flex: 1 }}>
+          <select
+            value={group?.key ?? ''}
+            onChange={(e) => setGroup(e.target.value ? { key: e.target.value, dir: group?.dir ?? 'asc' } : null)}
+            style={{ ...ctl, flex: 1 }}
+          >
             <option value="">none</option>
             {groupChoices.map((k) => (
               <option key={k} value={k}>{k}</option>
             ))}
           </select>
+          {group && (
+            <select value={group.dir} onChange={(e) => setGroup({ ...group, dir: e.target.value as GroupByConfig['dir'] })} style={ctl}>
+              <option value="asc">ascending</option>
+              <option value="desc">descending</option>
+            </select>
+          )}
         </div>
       )}
       <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>

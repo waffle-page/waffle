@@ -4,6 +4,7 @@ export {
   TABLE_COLUMN_MAX_WIDTH,
   TABLE_COLUMN_MIN_WIDTH,
   normalizeTableColumnWidth,
+  type GroupByConfig,
   type GroupSection,
   type LibraryItem,
   type TableColumnConfig,

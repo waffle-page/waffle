@@ -7,6 +7,7 @@ import {
   TABLE_COLUMN_DEFAULT_WIDTH,
   formatProperty,
   normalizeTableColumnWidth,
+  type GroupByConfig,
   type GroupSection,
   type LibraryItem,
   type TableColumnConfig,
@@ -66,9 +67,9 @@ export interface ViewSort {
 
 export interface ViewCfg {
   sort: ViewSort;
-  /** Flat AND of cmp nodes in v1 UI; stored as the core FilterNode for forward-compat. */
+  /** The v1 editor authors flat ANDs; imported recursive trees remain active and read-only. */
   filters: FilterNode | null;
-  groupBy: string | null;
+  groupBy: GroupByConfig | null;
   /** Table layout: property-column order + width; data keys not listed append at render time. */
   columns?: TableColumnConfig[];
   /**
@@ -118,15 +119,26 @@ function normalizeColumns(value: unknown): TableColumnConfig[] | undefined {
  * Old derived views embed their pre-Slice-B columns in `origin.spec`. Migrate
  * that snapshot with the live cfg or an untouched view would look divergent.
  */
-function normalizeOriginSpec(spec: string): string {
+function normalizeGroupBy(value: unknown): GroupByConfig | null {
+  if (typeof value === 'string') return value ? { key: value, dir: 'asc' } : null;
+  if (!value || typeof value !== 'object') return null;
+  const raw = value as { key?: unknown; dir?: unknown };
+  if (typeof raw.key !== 'string' || !raw.key) return null;
+  return { key: raw.key, dir: raw.dir === 'desc' ? 'desc' : 'asc' };
+}
+
+function normalizeOriginSpec(spec: string, groupBy: GroupByConfig | null): string {
   try {
-    const raw = JSON.parse(spec) as { layout?: unknown; sort?: unknown; filters?: unknown; columns?: unknown };
-    if (!Array.isArray(raw.columns)) return spec;
+    const raw = JSON.parse(spec) as { layout?: unknown; sort?: unknown; filters?: unknown; groupBy?: unknown; columns?: unknown };
     return JSON.stringify({
       layout: raw.layout,
       sort: raw.sort,
       filters: raw.filters,
-      columns: normalizeColumns(raw.columns) ?? null,
+      // Pre-parity derived views deliberately omitted groupBy from their
+      // ownership snapshot. Seed it from the live config or migration alone
+      // would falsely mark an untouched view as diverged.
+      groupBy: 'groupBy' in raw ? normalizeGroupBy(raw.groupBy) : groupBy,
+      columns: Array.isArray(raw.columns) ? normalizeColumns(raw.columns) ?? null : raw.columns ?? null,
     });
   } catch {
     return spec;
@@ -139,7 +151,7 @@ function parseCfg(json: string): ViewCfg {
     sort?: ViewSort | 'updated' | 'title';
     colSort?: ViewSort | null;
     filters?: FilterNode | null;
-    groupBy?: string | null;
+    groupBy?: unknown;
     columns?: unknown;
     origin?: ViewCfg['origin'];
   };
@@ -148,10 +160,11 @@ function parseCfg(json: string): ViewCfg {
     : raw.sort && typeof raw.sort === 'object' ? raw.sort
     : { key: '$updated', dir: 'desc' };
   if (raw.colSort) sort = raw.colSort;
-  const cfg: ViewCfg = { sort, filters: raw.filters ?? null, groupBy: raw.groupBy ?? null };
+  const groupBy = normalizeGroupBy(raw.groupBy);
+  const cfg: ViewCfg = { sort, filters: raw.filters ?? null, groupBy };
   const columns = normalizeColumns(raw.columns);
   if (columns) cfg.columns = columns;
-  if (raw.origin) cfg.origin = { ...raw.origin, spec: normalizeOriginSpec(raw.origin.spec) };
+  if (raw.origin) cfg.origin = { ...raw.origin, spec: normalizeOriginSpec(raw.origin.spec, groupBy) };
   return cfg;
 }
 
@@ -202,9 +215,19 @@ export async function saveViewState(id: string, layout: string, cfg: ViewCfg): P
   await platform.db.exec(`UPDATE views SET layout = ?, config = ? WHERE id = ?`, [layout, JSON.stringify(cfg), id]);
 }
 
+/** Re-home an imported projection when its positive file.inFolder scope changes. */
+export async function moveViewToFolder(id: string, folderId: string | null): Promise<void> {
+  const rows = await platform.db.exec<{ maxpos: number | null }>(`SELECT MAX(position) AS maxpos FROM views WHERE folder_id IS ?`, [folderId]);
+  await platform.db.exec(
+    `UPDATE views SET folder_id = ?, is_default = 0, position = ? WHERE id = ?`,
+    [folderId, (rows[0]?.maxpos ?? 0) + 1, id],
+  );
+}
+
 // ── Items query (one path for every layout: filters + sort compile to SQL) ──
 
 const CMP_SQL = { eq: '=', ne: '!=', lt: '<', lte: '<=', gt: '>', gte: '>=' } as const;
+const escapeLike = (value: string): string => value.replace(/[\\%_]/g, '\\$&');
 
 /**
  * FilterNode → WHERE fragment. Property cmps use EXISTS over the EAV rows —
@@ -216,19 +239,54 @@ const CMP_SQL = { eq: '=', ne: '!=', lt: '<', lte: '<=', gt: '>', gte: '>=' } as
 function filterSql(node: FilterNode, params: unknown[]): string {
   if (node.op !== 'cmp') {
     if (node.children.length === 0) return '1';
-    return '(' + node.children.map((c) => filterSql(c, params)).join(` ${node.op.toUpperCase()} `) + ')';
+    const join = node.op === 'not' ? ' OR ' : ` ${node.op.toUpperCase()} `;
+    const body = '(' + node.children.map((c) => filterSql(c, params)).join(join) + ')';
+    return node.op === 'not' ? `NOT ${body}` : body;
   }
-  if (node.key === '$title') {
-    params.push(node.cmp === 'contains' ? `%${String(node.value)}%` : String(node.value));
-    return node.cmp === 'contains' ? `t.title LIKE ?` : `t.title ${CMP_SQL[node.cmp as keyof typeof CMP_SQL] ?? '='} ?`;
+  if (node.key === '$title' || node.key === '$basename') {
+    params.push(String(node.value));
+    return node.cmp === 'contains' ? `INSTR(t.title, ?) > 0` : `t.title ${CMP_SQL[node.cmp as keyof typeof CMP_SQL] ?? '='} ?`;
+  }
+  if (node.key === '$name') {
+    const value = String(node.value);
+    params.push(value, `%/${escapeLike(value)}`);
+    const match = `(t.content_ref = ? OR t.content_ref LIKE ? ESCAPE '\\')`;
+    return node.cmp === 'ne' ? `NOT ${match}` : match;
+  }
+  if (node.key === '$path') {
+    params.push(String(node.value));
+    return node.cmp === 'contains' ? `INSTR(t.content_ref, ?) > 0` : `t.content_ref ${CMP_SQL[node.cmp as keyof typeof CMP_SQL] ?? '='} ?`;
+  }
+  if (node.key === '$folder') {
+    const field = `CASE WHEN f.path = '/' THEN '' ELSE SUBSTR(f.path, 2) END`;
+    if (node.cmp === 'inFolder') {
+      const folder = String(node.value).replace(/^\/+|\/+$/g, '');
+      params.push(folder, `${escapeLike(folder)}/%`);
+      return `(${field} = ? OR ${field} LIKE ? ESCAPE '\\')`;
+    }
+    params.push(String(node.value));
+    return node.cmp === 'contains' ? `INSTR(${field}, ?) > 0` : `${field} ${CMP_SQL[node.cmp as keyof typeof CMP_SQL] ?? '='} ?`;
+  }
+  if (node.key === '$ext') {
+    const pattern = `%.${escapeLike(String(node.value).replace(/^[.]/, '').toLowerCase())}`;
+    params.push(pattern);
+    return node.cmp === 'ne' ? `LOWER(t.content_ref) NOT LIKE ? ESCAPE '\\'` : `LOWER(t.content_ref) LIKE ? ESCAPE '\\'`;
+  }
+  if (node.key === '$updated') {
+    params.push(Number(node.value));
+    return `(unixepoch(t.updated_at) * 1000) ${CMP_SQL[node.cmp as keyof typeof CMP_SQL] ?? '='} ?`;
   }
   if (node.key === '$type') {
     params.push(String(node.value));
     return `t.type = ?`;
   }
   if (node.cmp === 'tagged') {
-    params.push(String(node.value).toLowerCase());
-    return `EXISTS (SELECT 1 FROM topping_tags tt JOIN tags g ON g.id = tt.tag_id WHERE tt.topping_id = t.id AND g.name = ?)`;
+    const tag = String(node.value).replace(/^#/, '').toLowerCase();
+    params.push(tag, `${escapeLike(tag)}/%`);
+    return `EXISTS (
+      SELECT 1 FROM topping_tags tt JOIN tags g ON g.id = tt.tag_id
+      WHERE tt.topping_id = t.id AND (g.name = ? OR g.name LIKE ? ESCAPE '\\')
+    )`;
   }
   const numeric = typeof node.value === 'number' || typeof node.value === 'boolean';
   if (numeric) {
@@ -236,11 +294,29 @@ function filterSql(node: FilterNode, params: unknown[]): string {
     return `EXISTS (SELECT 1 FROM properties p WHERE p.topping_id = t.id AND p.key = ? AND p.value_num ${CMP_SQL[node.cmp as keyof typeof CMP_SQL] ?? '='} ?)`;
   }
   if (node.cmp === 'contains') {
-    params.push(node.key, `%${String(node.value)}%`);
-    return `EXISTS (SELECT 1 FROM properties p WHERE p.topping_id = t.id AND p.key = ? AND p.value_text LIKE ?)`;
+    params.push(node.key, String(node.value), String(node.value));
+    return `EXISTS (
+      SELECT 1 FROM properties p
+      WHERE p.topping_id = t.id AND p.key = ?
+        AND (
+          (p.kind = 'list' AND EXISTS (SELECT 1 FROM json_each(p.value_text) j WHERE CAST(j.value AS TEXT) = ?))
+          OR (p.kind != 'list' AND INSTR(p.value_text, ?) > 0)
+        )
+    )`;
   }
   params.push(node.key, String(node.value));
   return `EXISTS (SELECT 1 FROM properties p WHERE p.topping_id = t.id AND p.key = ? AND p.value_text ${CMP_SQL[node.cmp as keyof typeof CMP_SQL] ?? '='} ?)`;
+}
+
+/** Positive folder predicates define a cross-folder/subtree projection. */
+export function inFolderFilter(filters: FilterNode | null): string | null {
+  if (!filters || filters.op === 'not' || filters.op === 'or') return null;
+  if (filters.op === 'cmp') return filters.key === '$folder' && filters.cmp === 'inFolder' ? String(filters.value) : null;
+  for (const child of filters.children) {
+    const folder = inFolderFilter(child);
+    if (folder !== null) return folder;
+  }
+  return null;
 }
 
 /**
@@ -254,7 +330,9 @@ export async function loadItems(folderId: string | null, cfg: ViewCfg): Promise<
   let join = '';
   let order: string;
   if (cfg.sort.key === '$updated') order = `t.updated_at ${dir}`;
-  else if (cfg.sort.key === '$title') order = `t.title COLLATE NOCASE ${dir}`;
+  else if (cfg.sort.key === '$title' || cfg.sort.key === '$basename' || cfg.sort.key === '$name') order = `t.title COLLATE NOCASE ${dir}`;
+  else if (cfg.sort.key === '$path') order = `t.content_ref COLLATE NOCASE ${dir}`;
+  else if (cfg.sort.key === '$folder') order = `f.path COLLATE NOCASE ${dir}, t.title COLLATE NOCASE ${dir}`;
   else {
     join = `LEFT JOIN properties s ON s.topping_id = t.id AND s.key = ?`;
     params.push(cfg.sort.key);
@@ -262,7 +340,7 @@ export async function loadItems(folderId: string | null, cfg: ViewCfg): Promise<
     order = `(s.topping_id IS NULL) ASC, s.value_num ${dir}, s.value_text COLLATE NOCASE ${dir}`;
   }
   let where = '';
-  if (folderId) {
+  if (folderId && inFolderFilter(cfg.filters) === null) {
     where += ' AND t.folder_id = ?';
     params.push(folderId);
   }
@@ -275,11 +353,12 @@ export async function loadItems(folderId: string | null, cfg: ViewCfg): Promise<
     content_ref: string | null;
     source: string | null;
     folder: string;
+    updated_at: string;
     thumb_ref: string | null;
     thumb_color: string | null;
     thumb_aspect: number | null;
   }>(
-    `SELECT t.id, t.type, t.title, t.content_ref, t.source, f.name AS folder, t.thumb_ref, t.thumb_color, t.thumb_aspect
+    `SELECT t.id, t.type, t.title, t.content_ref, t.source, f.name AS folder, t.updated_at, t.thumb_ref, t.thumb_color, t.thumb_aspect
      FROM toppings t JOIN folders f ON f.id = t.folder_id ${join}
      WHERE t.deleted_at IS NULL ${where}
      ORDER BY ${order}`,
@@ -292,6 +371,7 @@ export async function loadItems(folderId: string | null, cfg: ViewCfg): Promise<
     subtitle: r.folder,
     // Only vault-backed content is openable as a file; seed rows carry fake refs.
     contentRef: r.source === 'vault' ? r.content_ref : null,
+    updatedAt: r.updated_at,
     thumbRef: r.thumb_ref,
     thumbColor: r.thumb_color,
     aspect: r.thumb_aspect,
@@ -316,32 +396,47 @@ function groupOrderValue(v: PropertyValue | undefined): number | string | null {
  * preserved within each bucket) with the aligned section list every groupable
  * layout renders (LayoutProps.groups).
  */
-export async function loadGroupSections(folderId: string | null, key: string, items: LibraryItem[]): Promise<{ items: LibraryItem[]; groups: GroupSection[] }> {
-  const where = folderId ? 'AND t.folder_id = ?' : '';
-  const rows = await platform.db.exec<{ topping_id: string; kind: string; value_text: string | null; value_num: number | null; value_aux: string | null }>(
-    `SELECT p.topping_id, p.kind, p.value_text, p.value_num, p.value_aux
-     FROM properties p JOIN toppings t ON t.id = p.topping_id
-     WHERE t.deleted_at IS NULL AND p.key = ? ${where}`,
-    folderId ? [key, folderId] : [key],
-  );
+export async function loadGroupSections(_folderId: string | null, groupBy: GroupByConfig, items: LibraryItem[]): Promise<{ items: LibraryItem[]; groups: GroupSection[] }> {
+  const key = groupBy.key;
   const values = new Map<string, PropertyValue>();
-  for (const r of rows) {
-    const v = fromEavColumns(r.kind, r.value_text, r.value_num, r.value_aux);
-    if (v) values.set(r.topping_id, v);
+  if (!key.startsWith('$')) {
+    const rows = await platform.db.exec<{ topping_id: string; kind: string; value_text: string | null; value_num: number | null; value_aux: string | null }>(
+      `SELECT p.topping_id, p.kind, p.value_text, p.value_num, p.value_aux
+       FROM properties p JOIN toppings t ON t.id = p.topping_id
+       WHERE t.deleted_at IS NULL AND p.key = ?`,
+      [key],
+    );
+    const itemIds = new Set(items.map((item) => item.id));
+    for (const r of rows) {
+      if (!itemIds.has(r.topping_id)) continue;
+      const v = fromEavColumns(r.kind, r.value_text, r.value_num, r.value_aux);
+      if (v) values.set(r.topping_id, v);
+    }
   }
   const buckets = new Map<string, { order: number | string | null; items: LibraryItem[] }>();
   for (const item of items) {
     const value = values.get(item.id);
-    const label = value ? formatProperty(value) : `No ${key}`;
-    const bucket = buckets.get(label) ?? { order: groupOrderValue(value), items: [] };
+    const builtIn =
+      key === '$title' || key === '$basename' ? item.title
+      : key === '$name' ? item.contentRef?.split('/').pop() ?? null
+      : key === '$path' ? item.contentRef ?? null
+      : key === '$folder' ? item.contentRef?.split('/').slice(0, -1).join('/') ?? null
+      : key === '$ext' ? item.contentRef?.split('.').pop()?.toLowerCase() ?? null
+      : key === '$updated' ? item.updatedAt ?? null
+      : key === '$type' ? item.type
+      : null;
+    const label = value ? formatProperty(value) : builtIn || `No ${key}`;
+    const order = value ? groupOrderValue(value) : builtIn ? (key === '$updated' ? Date.parse(builtIn) : builtIn.toLowerCase()) : null;
+    const bucket = buckets.get(label) ?? { order, items: [] };
     bucket.items.push(item);
     buckets.set(label, bucket);
   }
+  const direction = groupBy.dir === 'desc' ? -1 : 1;
   const sorted = [...buckets.entries()].sort(([, a], [, b]) => {
     if (a.order === null) return 1; // the "No <key>" bucket sinks
     if (b.order === null) return -1;
-    if (typeof a.order === 'number' && typeof b.order === 'number') return a.order - b.order;
-    return String(a.order).localeCompare(String(b.order));
+    if (typeof a.order === 'number' && typeof b.order === 'number') return (a.order - b.order) * direction;
+    return String(a.order).localeCompare(String(b.order)) * direction;
   });
   return {
     items: sorted.flatMap(([, b]) => b.items),

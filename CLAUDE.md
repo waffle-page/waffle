@@ -112,11 +112,24 @@ array grammar, preserving item delimiters and scalar types. JSON-compatible
 nested YAML structures remain visible through a read-only `unsupported`
 carrier, so editing another property cannot collapse their shape.
 
+**Agreed Bases compatibility slice complete:** table/cards/list layouts,
+directional `groupBy`, recursive AND/OR/NOT plus leading negation, and the
+representable `file.*` filter/sort/group subset import and write back
+symmetrically. Global Bases live under Everything; positive `file.inFolder`
+views span that folder and descendants. The grammar boundary is isolated in
+`apps/web/src/importer/basesCompatibility.ts`. Unsupported filters and view
+states are all-or-nothing: no partial projection, no removal of an existing
+projection, and no file write. The executable acceptance contract is
+`docs/recipes/extend-obsidian-sync.md`.
+
 **Next, in agreed order:**
 
-1. **Bases compatibility parity** — import current `groupBy` and list views,
-   NOT/negated filters, and the common `file.*` fields Waffle can represent;
-   unsupported constructs continue to report/freeze rather than degrade.
+1. **Focused orchestrator simplification** — extract the actual seams now
+   established by Bases + table slices: pure table operation planning,
+   file→rescan→requery mutation commands, and library view/vault coordination.
+   Do not chase line counts; the exit test is that a cold developer can trace
+   a gesture, its row batching, its future inverse-patch point, and view versus
+   vault persistence in one sitting.
 2. **Table interaction slice C** — session undo/redo (inverse patches over
    property writes; deletes un-trash by stored path).
 3. **P1 remainder**: status/ratings surfacing in library views (chips +
@@ -133,11 +146,9 @@ Known deferred gaps (each states its owner): link/file properties
 (`.waffle/meta.json`, ADR-013), restore-from-trash UI, vault switcher (single
 active vault is documented v1 behavior), manual acceptance specs for the
 remaining quarantine modules (the table contract now lives at
-`docs/recipes/verify-table-interactions.md`; write the others as recipes/headers
-when next touching each module), and simplification of the three large
-orchestrators (Library / TableLayout / PropertyTable) once their
-responsibilities stop fitting a short explanation — audit corrective #6,
-deliberately last.
+`docs/recipes/verify-table-interactions.md` and the Obsidian contract at
+`docs/recipes/extend-obsidian-sync.md`; write the others as recipes/headers when
+next touching each module).
 
 **Escalation rule:** this file and the docs carry the engineering contract and
 the agreed queue — nothing more. Product direction, prioritization changes,

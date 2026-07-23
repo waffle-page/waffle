@@ -74,8 +74,9 @@ White linen shirt for the #wedding. Pairs with the tan loafers.
   'Finances/net-worth.dash': `{ "widgets": [] }\n`,
 
   // Obsidian-side config the importer consumes: vault-wide property types
-  // (types.json) and a Bases file with two views. `dietary` exercises the
-  // multitext/list mapping; negated/`file.ext` filters exercise honest skips.
+  // (types.json) and a Bases file. `dietary` exercises the multitext/list
+  // mapping; the views cover both negation spellings, file.ext, list layout,
+  // and directional groupBy.
   '.obsidian/types.json': `{
   "types": {
     "rating": "number",
@@ -92,6 +93,7 @@ White linen shirt for the #wedding. Pairs with the tan loafers.
 
   'Recipes/Recetas.base': `filters:
   and:
+    - 'file.inFolder("Recipes")'
     - 'file.ext == "md"'
 views:
   - type: table
@@ -99,7 +101,8 @@ views:
     filters:
       and:
         - 'rating >= 4.5'
-        - '!file.hasTag("dessert")'
+        - not:
+            - 'file.hasTag("dessert")'
     order:
       - file.name
       - rating
@@ -113,7 +116,21 @@ views:
         direction: DESC
   - type: cards
     name: Todas
-    limit: 50
+  - type: list
+    name: Vegetarianas
+    filters:
+      and:
+        - 'dietary.contains("vegetarian")'
+        - '!file.hasTag("excluded")'
+    order:
+      - file.name
+      - dietary
+    sort:
+      - property: file.path
+        direction: ASC
+    groupBy:
+      property: note.rating
+      direction: DESC
 `,
 };
 

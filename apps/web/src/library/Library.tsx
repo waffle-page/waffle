@@ -11,7 +11,7 @@ import { getVaultFs, platform, platformReady, setVaultFs, type PlatformStatus } 
 import { fsAccessSupported, pickRealFolder, restoreRealFolder } from '../platform/web/fsAccessFs';
 import { runThumbnailer } from '../thumbs/thumbnailer';
 import {
-  createView, deleteView, listViews, loadFolderTree, loadGroupSections, loadItems, loadPropertyKeys, renameView, saveViewState, setDefaultView,
+  createView, deleteView, inFolderFilter, listViews, loadFolderTree, loadGroupSections, loadItems, loadPropertyKeys, renameView, saveViewState, setDefaultView,
   type FolderNode, type FolderView, type ViewCfg,
 } from './queries';
 import { loadThumb } from './thumbLoader';
@@ -27,10 +27,17 @@ import { writeBackView, writeBackViewRemoval } from '../importer/baseWriteback';
 import './TableLayout'; // registers the 'table' layout (same load-time pattern as @waffle/ui's entries)
 
 /** cfg.filters is a flat AND of cmps in v1 — the popover edits exactly that. */
+const EDITABLE_FILTER_CMPS = new Set<FilterCondition['cmp']>(['eq', 'ne', 'lt', 'lte', 'gt', 'gte', 'contains', 'tagged']);
+const filtersAreEditable = (filters: FilterNode | null): boolean =>
+  !filters || (filters.op === 'and' && filters.children.every((child) => child.op === 'cmp' && EDITABLE_FILTER_CMPS.has(child.cmp as FilterCondition['cmp'])));
+
 const toConditions = (filters: FilterNode | null): FilterCondition[] =>
-  filters && filters.op === 'and'
-    ? filters.children.filter((c): c is Extract<FilterNode, { op: 'cmp' }> => c.op === 'cmp').map((c) => ({ key: c.key, cmp: c.cmp, value: c.value as FilterCondition['value'] }))
+  filtersAreEditable(filters) && filters?.op === 'and'
+    ? filters.children.filter((c): c is Extract<FilterNode, { op: 'cmp' }> => c.op === 'cmp').map((c) => ({ key: c.key, cmp: c.cmp as FilterCondition['cmp'], value: c.value as FilterCondition['value'] }))
     : [];
+
+const filterCount = (filters: FilterNode | null): number =>
+  !filters ? 0 : filters.op === 'cmp' ? 1 : filters.children.reduce((sum, child) => sum + filterCount(child), 0);
 
 const toFilterNode = (conditions: FilterCondition[]): FilterNode | null =>
   conditions.length === 0 ? null : { op: 'and', children: conditions.map((c) => ({ op: 'cmp' as const, key: c.key, cmp: c.cmp, value: c.value })) };
@@ -294,8 +301,18 @@ export function Library() {
 
   const openFilters = async (): Promise<void> => {
     if (!filterOpen) {
-      const props = await loadPropertyKeys(selectedRef.current);
-      setFields([{ key: '$title', kind: 'title' }, { key: '$type', kind: 'type' }, { key: '$tag', kind: 'tag' }, ...props.map((p) => ({ key: p.key, kind: p.kind }))]);
+      const props = await loadPropertyKeys(inFolderFilter(activeViewRef()?.cfg.filters ?? null) === null ? selectedRef.current : null);
+      setFields([
+        { key: '$title', kind: 'title' },
+        { key: '$type', kind: 'type' },
+        { key: '$tag', kind: 'tag' },
+        { key: '$name', kind: 'text' },
+        { key: '$path', kind: 'text' },
+        { key: '$folder', kind: 'text' },
+        { key: '$ext', kind: 'text' },
+        { key: '$updated', kind: 'date' },
+        ...props.map((p) => ({ key: p.key, kind: p.kind })),
+      ]);
     }
     setFilterOpen((o) => !o);
   };
@@ -304,7 +321,7 @@ export function Library() {
   const LayoutComponent = layout.component;
   const folderName = selected === null ? 'Everything' : findName(roots, selected) ?? '…';
   const cfg = activeView?.cfg ?? null;
-  const conditionCount = cfg ? toConditions(cfg.filters).length : 0;
+  const conditionCount = cfg ? filterCount(cfg.filters) : 0;
   const grouped = !!cfg?.groupBy && !!layout.groupable;
   const sortValue = cfg?.sort.key === '$title' ? '$title' : cfg?.sort.key === '$updated' ? '$updated' : 'prop';
   const tableConfig: TableViewConfig = { columns: cfg?.columns, sort: cfg?.sort ?? null, groupBy: cfg?.groupBy ?? null };
@@ -402,12 +419,13 @@ export function Library() {
             <FilterPopover
               fields={fields}
               conditions={toConditions(cfg.filters)}
+              filtersReadOnly={!filtersAreEditable(cfg.filters)}
               groupBy={cfg.groupBy}
-              groupChoices={fields.filter((f) => !f.key.startsWith('$')).map((f) => f.key)}
+              groupChoices={fields.filter((f) => f.key !== '$tag').map((f) => f.key)}
               showGroupBy={!!layout.groupable}
               onApply={(conditions, groupBy) => {
                 setFilterOpen(false);
-                void patchActive({ filters: toFilterNode(conditions), groupBy });
+                void patchActive({ filters: filtersAreEditable(cfg.filters) ? toFilterNode(conditions) : cfg.filters, groupBy });
               }}
               onClose={() => setFilterOpen(false)}
             />
@@ -443,6 +461,7 @@ export function Library() {
               loadThumb={loadThumb}
               onOpen={onOpenItem}
               folderId={selected}
+              crossFolder={inFolderFilter(cfg?.filters ?? null) !== null}
               onMutated={refreshQuiet}
               tableConfig={tableConfig}
               onTableConfig={(patch) => {
