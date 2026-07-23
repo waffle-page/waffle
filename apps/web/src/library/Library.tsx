@@ -6,12 +6,12 @@
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { scanVault, type FilterNode } from '@waffle/core';
-import { FilterPopover, getLayout, listLayouts, ViewTabs, type FilterCondition, type FilterField, type LibraryItem, type TableViewConfig } from '@waffle/ui';
+import { FilterPopover, getLayout, listLayouts, ViewTabs, type FilterCondition, type FilterField, type GroupSection, type LibraryItem, type TableViewConfig } from '@waffle/ui';
 import { getVaultFs, platform, platformReady, setVaultFs, type PlatformStatus } from '../platform/instance';
 import { fsAccessSupported, pickRealFolder, restoreRealFolder } from '../platform/web/fsAccessFs';
 import { runThumbnailer } from '../thumbs/thumbnailer';
 import {
-  createView, deleteView, listViews, loadFolderTree, loadItems, loadPropertyKeys, renameView, saveViewState, setDefaultView,
+  createView, deleteView, listViews, loadFolderTree, loadGroupSections, loadItems, loadPropertyKeys, renameView, saveViewState, setDefaultView,
   type FolderNode, type FolderView, type ViewCfg,
 } from './queries';
 import { loadThumb } from './thumbLoader';
@@ -39,6 +39,7 @@ export function Library() {
   const [selected, setSelected] = useState<string | null>(null);
   // null = loading (never show "empty" while a query is in flight)
   const [items, setItems] = useState<LibraryItem[] | null>(null);
+  const [groups, setGroups] = useState<GroupSection[] | null>(null);
   const [views, setViews] = useState<FolderView[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [filterOpen, setFilterOpen] = useState(false);
@@ -92,7 +93,14 @@ export function Library() {
     return find(roots)?.vaultPath ?? '';
   };
 
-  const activeCfg = (): ViewCfg | null => viewsRef.current.find((v) => v.id === activeIdRef.current)?.cfg ?? null;
+  const activeViewRef = (): FolderView | null => viewsRef.current.find((v) => v.id === activeIdRef.current) ?? null;
+
+  /** One query path for every load site: items + (when the layout renders them) group sections. */
+  const queryRows = async (folderId: string | null, view: FolderView): Promise<{ items: LibraryItem[]; groups: GroupSection[] | null }> => {
+    const loaded = await loadItems(folderId, view.cfg);
+    if (view.cfg.groupBy && getLayout(view.layout).groupable) return { ...(await loadGroupSections(folderId, view.cfg.groupBy, loaded)) };
+    return { items: loaded, groups: null };
+  };
 
   const openFolder = useCallback(async (folderId: string | null) => {
     setSelected(folderId);
@@ -102,7 +110,10 @@ export function Library() {
     const initial = list.find((v) => v.isDefault) ?? list[0]!;
     setViews(list);
     setActiveId(initial.id);
-    setItems(await loadItems(folderId, initial.cfg));
+    const loaded = await queryRows(folderId, initial);
+    setItems(loaded.items);
+    setGroups(loaded.groups);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const refreshAll = useCallback(async () => {
@@ -114,8 +125,12 @@ export function Library() {
   // keeps its scroll position, selection, and mounted editors across edits.
   const refreshQuiet = useCallback(async () => {
     setRoots(await loadFolderTree());
-    const cfg = activeCfg();
-    if (cfg) setItems(await loadItems(selectedRef.current, cfg));
+    const view = activeViewRef();
+    if (!view) return;
+    const loaded = await queryRows(selectedRef.current, view);
+    setItems(loaded.items);
+    setGroups(loaded.groups);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   /** Scan the active vault, generate missing thumbnails, refresh everything. */
@@ -188,8 +203,11 @@ export function Library() {
   const switchView = async (id: string): Promise<void> => {
     setActiveId(id);
     setFilterOpen(false);
-    const cfg = viewsRef.current.find((v) => v.id === id)?.cfg;
-    if (cfg) setItems(await loadItems(selectedRef.current, cfg));
+    const view = viewsRef.current.find((v) => v.id === id);
+    if (!view) return;
+    const loaded = await queryRows(selectedRef.current, view);
+    setItems(loaded.items);
+    setGroups(loaded.groups);
   };
 
   /** Patch the active view (optimistic), persist, and requery when results can change. */
@@ -200,7 +218,12 @@ export function Library() {
     const next: FolderView = { ...current, layout: layout ?? current.layout, cfg: { ...current.cfg, ...cfgPatch } };
     setViews(viewsRef.current.map((v) => (v.id === next.id ? next : v)));
     await saveViewState(next.id, next.layout, next.cfg);
-    if ('sort' in cfgPatch || 'filters' in cfgPatch) setItems(await loadItems(selectedRef.current, next.cfg));
+    // Layout switches requery too when grouped: sections exist only for groupable layouts.
+    if ('sort' in cfgPatch || 'filters' in cfgPatch || 'groupBy' in cfgPatch || (layout !== undefined && next.cfg.groupBy)) {
+      const loaded = await queryRows(selectedRef.current, next);
+      setItems(loaded.items);
+      setGroups(loaded.groups);
+    }
   };
 
   const onCreateView = async (name: string): Promise<void> => {
@@ -240,6 +263,7 @@ export function Library() {
   const folderName = selected === null ? 'Everything' : findName(roots, selected) ?? '…';
   const cfg = activeView?.cfg ?? null;
   const conditionCount = cfg ? toConditions(cfg.filters).length : 0;
+  const grouped = !!cfg?.groupBy && !!layout.groupable;
   const sortValue = cfg?.sort.key === '$title' ? '$title' : cfg?.sort.key === '$updated' ? '$updated' : 'prop';
   const tableConfig: TableViewConfig = { columns: cfg?.columns, sort: cfg?.sort ?? null, groupBy: cfg?.groupBy ?? null };
   const totalCount = countTree(roots);
@@ -281,12 +305,12 @@ export function Library() {
                 fontSize: '0.8rem',
                 border: '1px solid var(--border)',
                 borderRadius: 'var(--radius-sm)',
-                background: conditionCount > 0 || cfg?.groupBy ? 'var(--accent)' : 'var(--surface)',
-                color: conditionCount > 0 || cfg?.groupBy ? 'var(--accent-ink)' : 'var(--text-dim)',
+                background: conditionCount > 0 || grouped ? 'var(--accent)' : 'var(--surface)',
+                color: conditionCount > 0 || grouped ? 'var(--accent-ink)' : 'var(--text-dim)',
                 cursor: 'pointer',
               }}
             >
-              Filter{conditionCount > 0 ? ` · ${conditionCount}` : ''}{cfg?.groupBy ? ' · grouped' : ''}
+              Filter{conditionCount > 0 ? ` · ${conditionCount}` : ''}{grouped ? ' · grouped' : ''}
             </button>
             <select
               value={sortValue}
@@ -331,6 +355,7 @@ export function Library() {
               conditions={toConditions(cfg.filters)}
               groupBy={cfg.groupBy}
               groupChoices={fields.filter((f) => !f.key.startsWith('$')).map((f) => f.key)}
+              showGroupBy={!!layout.groupable}
               onApply={(conditions, groupBy) => {
                 setFilterOpen(false);
                 void patchActive({ filters: toFilterNode(conditions), groupBy });
@@ -365,6 +390,7 @@ export function Library() {
           ) : (
             <LayoutComponent
               items={items}
+              groups={groups}
               loadThumb={loadThumb}
               onOpen={onOpenItem}
               folderId={selected}

@@ -1,5 +1,5 @@
 export * from './icons';
-export type { LibraryItem, TableViewConfig, ThumbLoader } from './types';
+export type { GroupSection, LibraryItem, TableViewConfig, ThumbLoader } from './types';
 export { PropertyTable, TITLE_SORT_KEY, type PropertyTableProps, type TableColumn, type TableRowData } from './PropertyTable';
 export { PropertyCell, formatProperty, parseCellInput, EDITABLE_KINDS } from './PropertyCell';
 export { ViewTabs, type ViewTabInfo, type ViewTabsProps } from './ViewTabs';

@@ -19,7 +19,7 @@ import { loadPropertyMap, vaultDirFor } from './queries';
 
 type PropMap = Map<string, Record<string, PropertyValue>>;
 
-function TableLayout({ items, folderId = null, onOpen, onMutated, tableConfig, onTableConfig }: LayoutProps) {
+function TableLayout({ items, groups, folderId = null, onOpen, onMutated, tableConfig, onTableConfig }: LayoutProps) {
   const [propMap, setPropMap] = useState<PropMap | null>(null);
   const [types, setTypes] = useState<PropertyTypes>({});
   const [dir, setDir] = useState<string | null>(null);
@@ -105,9 +105,6 @@ function TableLayout({ items, folderId = null, onOpen, onMutated, tableConfig, o
     onTableConfig?.({ sort: next });
   };
 
-  const groupCol = tableConfig?.groupBy
-    ? columns.find((c) => c.key === tableConfig.groupBy) ?? { key: tableConfig.groupBy, kind: 'text' as const }
-    : null;
 
   const run = async (work: () => Promise<void>): Promise<void> => {
     setBusy(true);
@@ -237,7 +234,7 @@ function TableLayout({ items, folderId = null, onOpen, onMutated, tableConfig, o
         <PropertyTable
           rows={rows}
           columns={columns}
-          groupBy={groupCol}
+          groups={groups}
           sort={tableConfig?.sort ?? null}
           onSort={onSort}
           selected={selected}

@@ -25,6 +25,8 @@ export interface FilterPopoverProps {
   groupBy: string | null;
   /** Property keys offered for grouping (select/text/checkbox/number make sense; host decides). */
   groupChoices: string[];
+  /** false ⇒ the active layout can't render sections; the group control is hidden, not ignored. */
+  showGroupBy?: boolean;
   onApply: (conditions: FilterCondition[], groupBy: string | null) => void;
   onClose: () => void;
 }
@@ -71,7 +73,7 @@ interface DraftRow {
 
 const ctl: CSSProperties = { background: 'var(--surface)', color: 'var(--text)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '0.25rem 0.45rem', fontSize: '0.8rem' };
 
-export function FilterPopover({ fields, conditions, groupBy, groupChoices, onApply, onClose }: FilterPopoverProps) {
+export function FilterPopover({ fields, conditions, groupBy, groupChoices, showGroupBy = true, onApply, onClose }: FilterPopoverProps) {
   const [rows, setRows] = useState<DraftRow[]>(() =>
     conditions.map((c) => ({ key: c.key, cmp: c.cmp, raw: rawValue(fields.find((f) => f.key === c.key)?.kind ?? 'text', c.value) })),
   );
@@ -140,15 +142,17 @@ export function FilterPopover({ fields, conditions, groupBy, groupChoices, onApp
           + condition
         </button>
       </div>
-      <div style={{ display: 'flex', gap: 6, alignItems: 'center', borderTop: '1px solid var(--border)', paddingTop: 8 }}>
-        <span style={{ fontSize: '0.8rem', color: 'var(--text-dim)' }}>Group by</span>
-        <select value={group ?? ''} onChange={(e) => setGroup(e.target.value || null)} style={{ ...ctl, flex: 1 }}>
-          <option value="">none</option>
-          {groupChoices.map((k) => (
-            <option key={k} value={k}>{k}</option>
-          ))}
-        </select>
-      </div>
+      {showGroupBy && (
+        <div style={{ display: 'flex', gap: 6, alignItems: 'center', borderTop: '1px solid var(--border)', paddingTop: 8 }}>
+          <span style={{ fontSize: '0.8rem', color: 'var(--text-dim)' }}>Group by</span>
+          <select value={group ?? ''} onChange={(e) => setGroup(e.target.value || null)} style={{ ...ctl, flex: 1 }}>
+            <option value="">none</option>
+            {groupChoices.map((k) => (
+              <option key={k} value={k}>{k}</option>
+            ))}
+          </select>
+        </div>
+      )}
       <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
         <button onClick={onClose} style={{ ...ctl, cursor: 'pointer' }}>Cancel</button>
         <button onClick={apply} style={{ ...ctl, cursor: 'pointer', background: 'var(--accent)', color: 'var(--accent-ink)', fontWeight: 600 }}>Apply</button>

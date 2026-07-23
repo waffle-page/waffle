@@ -18,6 +18,12 @@ export interface LibraryItem {
 /** Resolves a topping's thumbnail to a displayable URL (platform-owned). */
 export type ThumbLoader = (item: LibraryItem) => Promise<string | null>;
 
+/** One contiguous section of a grouped item list: `count` items starting where the previous section ended. */
+export interface GroupSection {
+  label: string;
+  count: number;
+}
+
 /** Table-layout slice of a view's persisted config (docs/12). */
 export interface TableViewConfig {
   /** Column order; data keys not listed append at render time. */

@@ -3,7 +3,7 @@
  * language, no ORM). Every function returns presentation-ready shapes.
  */
 import { fromEavColumns, type FilterNode, type PropertyValue } from '@waffle/core';
-import type { LibraryItem } from '@waffle/ui';
+import { formatProperty, type GroupSection, type LibraryItem } from '@waffle/ui';
 import { platform } from '../platform/instance';
 
 export interface FolderNode {
@@ -231,6 +231,57 @@ export async function loadItems(folderId: string | null, cfg: ViewCfg): Promise<
     thumbColor: r.thumb_color,
     aspect: r.thumb_aspect,
   }));
+}
+
+function groupOrderValue(v: PropertyValue | undefined): number | string | null {
+  if (!v) return null;
+  switch (v.kind) {
+    case 'number': return v.value;
+    case 'money': return v.amount;
+    case 'duration': return v.seconds;
+    case 'checkbox': return v.value ? 1 : 0;
+    case 'date': return Date.parse(v.iso) || 0;
+    default: return formatProperty(v).toLowerCase();
+  }
+}
+
+/**
+ * Bucket `items` by a property (view groupBy) into contiguous sections: items
+ * come back REORDERED (bucket order: value asc, missing last; the view's sort
+ * preserved within each bucket) with the aligned section list every groupable
+ * layout renders (LayoutProps.groups).
+ */
+export async function loadGroupSections(folderId: string | null, key: string, items: LibraryItem[]): Promise<{ items: LibraryItem[]; groups: GroupSection[] }> {
+  const where = folderId ? 'AND t.folder_id = ?' : '';
+  const rows = await platform.db.exec<{ topping_id: string; kind: string; value_text: string | null; value_num: number | null; value_aux: string | null }>(
+    `SELECT p.topping_id, p.kind, p.value_text, p.value_num, p.value_aux
+     FROM properties p JOIN toppings t ON t.id = p.topping_id
+     WHERE t.deleted_at IS NULL AND p.key = ? ${where}`,
+    folderId ? [key, folderId] : [key],
+  );
+  const values = new Map<string, PropertyValue>();
+  for (const r of rows) {
+    const v = fromEavColumns(r.kind, r.value_text, r.value_num, r.value_aux);
+    if (v) values.set(r.topping_id, v);
+  }
+  const buckets = new Map<string, { order: number | string | null; items: LibraryItem[] }>();
+  for (const item of items) {
+    const value = values.get(item.id);
+    const label = value ? formatProperty(value) : `No ${key}`;
+    const bucket = buckets.get(label) ?? { order: groupOrderValue(value), items: [] };
+    bucket.items.push(item);
+    buckets.set(label, bucket);
+  }
+  const sorted = [...buckets.entries()].sort(([, a], [, b]) => {
+    if (a.order === null) return 1; // the "No <key>" bucket sinks
+    if (b.order === null) return -1;
+    if (typeof a.order === 'number' && typeof b.order === 'number') return a.order - b.order;
+    return String(a.order).localeCompare(String(b.order));
+  });
+  return {
+    items: sorted.flatMap(([, b]) => b.items),
+    groups: sorted.map(([label, b]) => ({ label, count: b.items.length })),
+  };
 }
 
 export interface PropertyField {
