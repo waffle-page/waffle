@@ -21,8 +21,8 @@ The standing order: **any competent TS developer arriving cold must become produ
 
 File watching + hash re-association · shared-folder sync (LWW, tombstones) ·
 sandbox RPC bridge · CodeMirror wiring · virtualized layouts · table grid
-interaction (`PropertyTable` + `tableGridState`) · bidirectional Obsidian
-config sync.
+interaction (`PropertyTable` + its grid/clipboard/column companions) · bidirectional Obsidian
+config sync (`obsidianImport` + `basesCompatibility` + `baseWriteback`).
 
 Rules for these modules: keep each in **one small directory**; header comment states *why it is hairy* and the invariants it protects; each carries a **manual acceptance spec** (in its recipe or header) that a human or agent can execute — when a test runner earns its place, tests inherit that spec verbatim; no application logic inside — they expose a plain interface and the rest of the app never knows the pain.
 
@@ -31,7 +31,7 @@ Rules for these modules: keep each in **one small directory**; header comment st
 - **No premature abstraction.** Duplicate twice; abstract on the third occurrence. Delete the abstraction if it drops back to one caller.
 - **Dependency budget.** Every package is a thing the next coder must learn. Additions need a one-line justification in the PR; prefer 30 lines of our own code over a 30kB dependency.
 - **Small files, flat structure.** No barrel-file sprawl, no `utils.ts` dumping grounds; a file is findable by what it's named.
-- **Recipes over patterns.** `docs/recipes/` holds the how-to for each SHIPPED extension seam (today: renderer, property type, Obsidian sync). A recipe lands in the same PR as the seam that creates it (add-a-connector arrives with the connector SDK), and is updated in the same PR that changes its seam.
+- **Recipes over patterns.** `docs/recipes/` holds the how-to for each SHIPPED extension seam (today: renderer, property type, table interaction, Library coordination, Obsidian sync). A recipe lands in the same PR as the seam that creates it (add-a-connector arrives with the connector SDK), and is updated in the same PR that changes its seam.
 - **Comments state constraints, not narration.** Write *why this can't be the obvious way*, never *what the next line does*.
 - **Musk step 2 applies to code review**: before optimizing or abstracting, ask if the thing should exist. Delete > simplify > optimize, in that order.
 

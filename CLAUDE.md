@@ -122,21 +122,26 @@ states are all-or-nothing: no partial projection, no removal of an existing
 projection, and no file write. The executable acceptance contract is
 `docs/recipes/extend-obsidian-sync.md`.
 
+**Focused orchestrator simplification complete:** table gestures now become
+pure before/after row plans in `tableOperations.ts`; `vaultMutations.ts` is the
+single table/soft-delete command boundary for file → rescan and returns the
+receipts Slice C will record; `TableLayout` owns only optimistic/pending/requery
+coordination. `PropertyTable` delegates clipboard and column pointer sessions.
+`useLibraryViews.ts` now owns saved-view projection/persistence (including
+derived `.base` write-back), while `vaultLifecycle.ts` owns full scans,
+Obsidian reconciliation, and thumbnails. The trace and manual acceptance live
+in `docs/recipes/verify-table-interactions.md` and
+`docs/recipes/trace-library-coordination.md`.
+
 **Next, in agreed order:**
 
-1. **Focused orchestrator simplification** — extract the actual seams now
-   established by Bases + table slices: pure table operation planning,
-   file→rescan→requery mutation commands, and library view/vault coordination.
-   Do not chase line counts; the exit test is that a cold developer can trace
-   a gesture, its row batching, its future inverse-patch point, and view versus
-   vault persistence in one sitting.
-2. **Table interaction slice C** — session undo/redo (inverse patches over
+1. **Table interaction slice C** — session undo/redo (inverse patches over
    property writes; deletes un-trash by stored path).
-3. **P1 remainder**: status/ratings surfacing in library views (chips +
+2. **P1 remainder**: status/ratings surfacing in library views (chips +
    interaction filters), theme palette editor, Supabase auth, Capacitor shell
    (share extension), Tauri shell (native FS watching — replaces the
    per-write-site rescans with a real watcher), on-device Whisper.
-4. **P2 sharing opens with two distinct surfaces**: collaborative invite links
+3. **P2 sharing opens with two distinct surfaces**: collaborative invite links
    and unlisted public publishing for a single topping or folder. Public links
    are revocable, read-only projections with stable, crawler-fetchable
    Open Graph/Twitter Card images for WhatsApp and equivalent unfurlers. The

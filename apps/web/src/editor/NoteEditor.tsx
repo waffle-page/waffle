@@ -16,7 +16,7 @@ import { EditorView, basicSetup } from 'codemirror';
 import { markdown } from '@codemirror/lang-markdown';
 import { rescanFile } from '@waffle/core';
 import { getVaultFs, platform } from '../platform/instance';
-import { trashFile } from '../library/deleteFlows';
+import { trashVaultFiles } from '../library/vaultMutations';
 import { vaultUrl, mimeFor } from './assetUrl';
 import { livePreview } from './livePreview';
 import { liveStyle } from './liveStyle';
@@ -95,7 +95,7 @@ export function NoteEditor({
     }
     setDirty(false);
     const fs = await getVaultFs();
-    await trashFile(fs, path);
+    await trashVaultFiles(fs, [path]);
     onClose();
   };
 

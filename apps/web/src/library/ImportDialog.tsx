@@ -43,10 +43,10 @@ export function ImportDialog({ onClose, onImported }: { onClose: () => void; onI
 
   return (
     <div style={{ position: 'absolute', inset: 0, zIndex: 20, background: 'color-mix(in srgb, var(--bg) 60%, transparent)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-      <div style={{ width: 560, maxWidth: '92vw', maxHeight: '80vh', overflowY: 'auto', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', boxShadow: '0 12px 40px rgba(0,0,0,0.25)', padding: '1rem 1.25rem', fontSize: '0.85rem' }}>
+      <div style={{ width: 560, maxWidth: '92vw', maxHeight: '80vh', overflowY: 'auto', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', boxShadow: 'var(--shadow-dialog)', padding: '1rem 1.25rem', fontSize: '0.85rem' }}>
         <h2 style={{ margin: '0 0 0.25rem', fontSize: '1rem' }}>Obsidian sync</h2>
         <p style={{ ...dim, margin: '0 0 0.75rem', fontSize: '0.78rem' }}>
-          Runs automatically at every vault scan: `.obsidian/types.json` merges into property declarations (yours win), `.base` views stay in sync until you edit them in Waffle — then they're yours.
+          Runs automatically at every vault scan: `.obsidian/types.json` merges into property declarations (yours win), and representable `.base` view edits round-trip. Inexpressible edits freeze without changing the file.
         </p>
 
         {error && <p style={{ color: 'var(--ink-blush)' }}>{error}</p>}

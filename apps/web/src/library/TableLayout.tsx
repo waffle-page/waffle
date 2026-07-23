@@ -1,58 +1,36 @@
 /**
  * The 'table' layout (docs/12: notes as rows) — registered from the app, not
- * @waffle/ui, because its cells WRITE: an edit patches the note's frontmatter
- * on disk and rescans (propertyWrite.ts). Non-note rows display read-only
- * until link/file properties get their `.waffle/meta.json` mirror (ADR-013).
- * Column kinds resolve declaration-first (.waffle/properties.json), then from
- * the data itself.
+ * @waffle/ui, because its cells WRITE. tableOperations.ts plans each gesture;
+ * vaultMutations.ts executes file → rescan; this component owns optimistic
+ * projection, pending accounting, canonical requery, and controls. Non-note
+ * rows display read-only until link/file properties get their
+ * `.waffle/meta.json` mirror (ADR-013). Column kinds resolve declaration-first
+ * (.waffle/properties.json), then from the data itself.
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { loadPropertyTypes, propertyToYaml, rescanFile, savePropertyTypes, updateFrontmatter, type PropertyTypes, type PropertyValue } from '@waffle/core';
+import { loadPropertyTypes, savePropertyTypes, type PropertyTypes, type PropertyValue } from '@waffle/core';
 import {
-  EDITABLE_KINDS, PropertyTable, TABLE_COLUMN_DEFAULT_WIDTH, TableIcon, TITLE_SORT_KEY, parseCellInput, registerLayout,
-  type CellInputParseResult, type EditablePropertyKind, type LayoutProps, type TableColumn, type TableColumnConfig, type TableGridCell, type TableRowData,
+  EDITABLE_KINDS, PropertyTable, TABLE_COLUMN_DEFAULT_WIDTH, TableIcon, parseCellInput, registerLayout,
+  type EditablePropertyKind, type LayoutProps, type TableColumn, type TableColumnConfig, type TableGridCell, type TableRowData,
 } from '@waffle/ui';
-import { getVaultFs, platform } from '../platform/instance';
-import { createNote } from './addFlows';
-import { trashFile } from './deleteFlows';
-import { writeNoteProperties, writeNoteProperty } from './propertyWrite';
+import { getVaultFs } from '../platform/instance';
 import { loadPropertyMap, vaultDirFor } from './queries';
+import {
+  canAuthorProperty,
+  optimisticPatchMap,
+  pasteNotice,
+  planBulkEdit,
+  planCellEdit,
+  planClearCells,
+  planFillDown,
+  planPasteAppend,
+  planPasteAtAnchor,
+  type PropertyPatch,
+  type TableOperationPlan,
+} from './tableOperations';
+import { commitTableOperation, createEmptyNote, trashVaultFiles } from './vaultMutations';
 
 type PropMap = Map<string, Record<string, PropertyValue>>;
-
-const PASTE_TRUE = new Set(['true', 'yes', '1']);
-const PASTE_BOOL = new Set([...PASTE_TRUE, 'false', 'no', '0']);
-const PASTE_DATE = /^\d{4}-\d{2}-\d{2}$/;
-
-/** Column kind from a pasted column's values: unanimity or bust (text). */
-function inferPasteKind(values: string[]): EditablePropertyKind {
-  const vs = values.map((v) => v.trim()).filter((v) => v !== '');
-  if (vs.length === 0) return 'text';
-  if (vs.every((v) => parseCellInput('list', v, 'EUR').ok)) return 'list';
-  if (vs.every((v) => !Number.isNaN(Number(v)))) return 'number';
-  if (vs.every((v) => PASTE_DATE.test(v))) return 'date';
-  if (vs.every((v) => PASTE_BOOL.has(v.toLowerCase()))) return 'checkbox';
-  return 'text';
-}
-
-function pasteCellValue(kind: PropertyValue['kind'], raw: string, currency: string): CellInputParseResult {
-  const s = raw.trim();
-  if (s === '') return { ok: true, value: null };
-  if (kind === 'checkbox') {
-    return PASTE_BOOL.has(s.toLowerCase())
-      ? { ok: true, value: { kind: 'checkbox', value: PASTE_TRUE.has(s.toLowerCase()) } }
-      : { ok: false, message: 'Use true, false, yes, no, 1, or 0.' };
-  }
-  return parseCellInput(kind, s, currency);
-}
-
-function samePropertyValue(left: PropertyValue | null | undefined, right: PropertyValue | null): boolean {
-  return JSON.stringify(left ?? null) === JSON.stringify(right);
-}
-
-function canAuthorProperty(row: TableRowData, key: string): boolean {
-  return row.editable && row.props[key]?.kind !== 'unsupported';
-}
 
 function TableLayout({ items, groups, folderId = null, crossFolder = false, onOpen, onMutated, tableConfig, onTableConfig }: LayoutProps) {
   const [propMap, setPropMap] = useState<PropMap | null>(null);
@@ -66,8 +44,8 @@ function TableLayout({ items, groups, folderId = null, crossFolder = false, onOp
   const [bulkRaw, setBulkRaw] = useState('');
   const [confirmDelete, setConfirmDelete] = useState(false);
   const pendingMutations = useRef(0);
-  const folderIdRef = useRef(folderId);
-  folderIdRef.current = folderId;
+  const propertyScopeRef = useRef<string | null>(crossFolder ? null : folderId);
+  propertyScopeRef.current = crossFolder ? null : folderId;
 
   useEffect(() => {
     let dead = false;
@@ -138,7 +116,7 @@ function TableLayout({ items, groups, folderId = null, crossFolder = false, onOp
 
   const rowById = useMemo(() => new Map(rows.map((r) => [r.item.id, r])), [rows]);
 
-  const patchOptimistically = (patches: ReadonlyMap<string, Readonly<Record<string, PropertyValue | null>>>): void => {
+  const patchOptimistically = (patches: ReadonlyMap<string, Readonly<PropertyPatch>>): void => {
     setPropMap((prev) => {
       const next = new Map(prev);
       for (const [id, patch] of patches) {
@@ -181,9 +159,9 @@ function TableLayout({ items, groups, folderId = null, crossFolder = false, onOp
       pendingMutations.current -= 1;
       if (pendingMutations.current === 0) {
         try {
-          const refreshFolder = folderIdRef.current;
-          const canonical = await loadPropertyMap(refreshFolder);
-          if (pendingMutations.current === 0 && folderIdRef.current === refreshFolder) {
+          const refreshScope = propertyScopeRef.current;
+          const canonical = await loadPropertyMap(refreshScope);
+          if (pendingMutations.current === 0 && propertyScopeRef.current === refreshScope) {
             setPropMap(canonical);
           }
         } catch (e) {
@@ -195,37 +173,33 @@ function TableLayout({ items, groups, folderId = null, crossFolder = false, onOp
     }
   };
 
-  const onEditCell = (id: string, key: string, value: PropertyValue | null): void => {
-    const row = rowById.get(id);
-    if (!row || !canAuthorProperty(row, key) || !row.item.contentRef) return;
-    // Optimistic: the file write + rescan lag a beat; the cell must not snap back.
-    patchOptimistically(new Map([[id, { [key]: value }]]));
-    const path = row.item.contentRef;
+  const perform = (plan: TableOperationPlan, notice: string | null = null): void => {
+    if (plan.patches.length > 0) patchOptimistically(optimisticPatchMap(plan.patches));
+    if (plan.patches.length === 0 && plan.creates.length === 0) {
+      setError(notice);
+      return;
+    }
     void run(async () => {
-      const fs = await getVaultFs();
-      await writeNoteProperty(fs, path, key, value);
-    });
+      await commitTableOperation(await getVaultFs(), dir, plan);
+    }, notice);
+  };
+
+  const onEditCell = (id: string, key: string, value: PropertyValue | null): void => {
+    perform(planCellEdit(rowById.get(id), key, value));
   };
 
   const onCreateRow = (title: string): void => {
     if (dir === null) return;
     void run(async () => {
-      const fs = await getVaultFs();
-      const path = await createNote(fs, dir, title);
-      await rescanFile(platform.db, fs, path);
+      await createEmptyNote(await getVaultFs(), dir, title);
     });
   };
 
   const applyBulk = (value: PropertyValue | null): void => {
     if (!bulkKey) return;
     const key = bulkKey;
-    const selectedNotes = rows.filter((r) => selected.has(r.item.id) && r.editable && r.item.contentRef);
-    const targets = value === null ? selectedNotes : selectedNotes.filter((r) => canAuthorProperty(r, key));
-    const skipped = selectedNotes.length - targets.length;
-    void run(async () => {
-      const fs = await getVaultFs();
-      for (const t of targets) await writeNoteProperty(fs, t.item.contentRef!, key, value);
-    }, skipped > 0 ? `${key}: skipped ${skipped} read-only structured value${skipped === 1 ? '' : 's'}.` : null);
+    const plan = planBulkEdit(rows, selected, key, value);
+    perform(plan, plan.skipped > 0 ? `${key}: skipped ${plan.skipped} read-only structured value${plan.skipped === 1 ? '' : 's'}.` : null);
   };
 
   const applyBulkRaw = (): void => {
@@ -247,58 +221,11 @@ function TableLayout({ items, groups, folderId = null, crossFolder = false, onOp
   };
 
   const onClearCells = (cells: TableGridCell[]): void => {
-    const patches = new Map<string, Record<string, PropertyValue | null>>();
-    for (const cell of cells) {
-      const row = rowById.get(cell.rowId);
-      if (!row?.editable || !row.item.contentRef || row.props[cell.columnKey] === undefined) continue;
-      const patch = patches.get(cell.rowId) ?? {};
-      patch[cell.columnKey] = null;
-      patches.set(cell.rowId, patch);
-    }
-    if (patches.size === 0) return;
-    patchOptimistically(patches);
-    void run(async () => {
-      const fs = await getVaultFs();
-      for (const [id, patch] of patches) {
-        const path = rowById.get(id)?.item.contentRef;
-        if (path) await writeNoteProperties(fs, path, patch);
-      }
-    });
+    perform(planClearCells(rowById, cells));
   };
 
   const onFillDown = (cellRows: TableGridCell[][]): void => {
-    if (cellRows.length < 2) return;
-    const sourceRow = rowById.get(cellRows[0]?.[0]?.rowId ?? '');
-    if (!sourceRow) return;
-    const sourceValues = new Map<string, PropertyValue | null>();
-    for (const cell of cellRows[0] ?? []) {
-      const column = columns.find((candidate) => candidate.key === cell.columnKey);
-      if (!column || !canAuthorProperty(sourceRow, cell.columnKey) || !EDITABLE_KINDS.includes(column.kind)) continue;
-      sourceValues.set(cell.columnKey, sourceRow.props[cell.columnKey] ?? null);
-    }
-    if (sourceValues.size === 0) return;
-
-    const patches = new Map<string, Record<string, PropertyValue | null>>();
-    for (const cells of cellRows.slice(1)) {
-      const target = rowById.get(cells[0]?.rowId ?? '');
-      if (!target?.editable || !target.item.contentRef) continue;
-      const patch: Record<string, PropertyValue | null> = {};
-      for (const cell of cells) {
-        if (!sourceValues.has(cell.columnKey) || !canAuthorProperty(target, cell.columnKey)) continue;
-        const value = sourceValues.get(cell.columnKey) ?? null;
-        if (!samePropertyValue(target.props[cell.columnKey], value)) patch[cell.columnKey] = value;
-      }
-      if (Object.keys(patch).length > 0) patches.set(target.item.id, patch);
-    }
-    if (patches.size === 0) return;
-    patchOptimistically(patches);
-    void run(async () => {
-      const fs = await getVaultFs();
-      for (const [id, patch] of patches) {
-        const path = rowById.get(id)?.item.contentRef;
-        if (path) await writeNoteProperties(fs, path, patch);
-      }
-    });
+    perform(planFillDown(rowById, columns, cellRows));
   };
 
   const onColumnsChange = (next: TableColumnConfig[]): void => {
@@ -307,134 +234,24 @@ function TableLayout({ items, groups, folderId = null, crossFolder = false, onOp
 
   /** Selected-cell paste overwrites existing note rows, then creates overflow notes. */
   const onPasteCells = (anchor: TableGridCell, grid: string[][]): void => {
-    if (grid.length === 0) return;
-    const rowStart = rows.findIndex((row) => row.item.id === anchor.rowId);
-    const gridColumns = [TITLE_SORT_KEY, ...columns.map((column) => column.key)];
-    const columnStart = gridColumns.indexOf(anchor.columnKey);
-    if (rowStart < 0 || columnStart < 0) return;
-
-    const existing = new Map<string, Record<string, PropertyValue | null>>();
-    const overflow: Array<{ title: string; values: Record<string, PropertyValue | null> }> = [];
-    const invalid: string[] = [];
-    grid.forEach((sourceRow, rowOffset) => {
-      const target = rows[rowStart + rowOffset];
-      const values: Record<string, PropertyValue | null> = {};
-      let title = 'Untitled';
-      sourceRow.forEach((raw, columnOffset) => {
-        const key = gridColumns[columnStart + columnOffset];
-        if (!key) return;
-        if (key === TITLE_SORT_KEY) {
-          title = raw.trim() || 'Untitled';
-          return;
-        }
-        const column = columns.find((candidate) => candidate.key === key);
-        if (!column || !EDITABLE_KINDS.includes(column.kind)) return;
-        if (target && !canAuthorProperty(target, key)) {
-          invalid.push(`${key}: nested YAML values are read-only`);
-          return;
-        }
-        const parsed = pasteCellValue(column.kind, raw, column.currency ?? 'EUR');
-        if (!parsed.ok) {
-          invalid.push(`${key}: ${parsed.message}`);
-          return;
-        }
-        values[key] = parsed.value;
-      });
-      if (target) {
-        if (target.editable && target.item.contentRef && Object.keys(values).length > 0) {
-          existing.set(target.item.id, values);
-        }
-      } else if (dir !== null) {
-        overflow.push({ title, values });
-      }
-    });
-
-    if (existing.size > 0) patchOptimistically(existing);
-    const notice = invalid.length > 0
-      ? `Paste skipped ${invalid.length} invalid cell${invalid.length === 1 ? '' : 's'} — ${invalid[0]}`
-      : null;
-    if (existing.size === 0 && overflow.length === 0) {
-      setError(notice);
-      return;
-    }
-    void run(async () => {
-      const fs = await getVaultFs();
-      for (const [id, values] of existing) {
-        const path = rowById.get(id)?.item.contentRef;
-        if (path) await writeNoteProperties(fs, path, values);
-      }
-      for (const row of overflow) {
-        const patch = Object.fromEntries(
-          Object.entries(row.values).flatMap(([key, value]) => value === null ? [] : [[key, propertyToYaml(value)]]),
-        );
-        const contents = Object.keys(patch).length > 0 ? updateFrontmatter('', patch) : '';
-        const path = await createNote(fs, dir!, row.title, contents);
-        await rescanFile(platform.db, fs, path);
-      }
-    }, notice);
+    const plan = planPasteAtAnchor({ anchor, grid, rows, columns, allowOverflow: dir !== null });
+    perform(plan, pasteNotice(plan.invalid));
   };
 
   /** Spreadsheet paste → notes-as-rows (docs/12 applied to ingestion). */
   const onPasteRows = (grid: string[][]): void => {
     if (dir === null || grid.length === 0) return;
+    const plan = planPasteAppend(grid, columns, types);
     void run(async () => {
       const fs = await getVaultFs();
-      const byLower = new Map(columns.map((c) => [c.key.toLowerCase(), c] as const));
-      const first = grid[0]!.map((c) => c.trim());
-      // Header mode: a header cell names an existing column, or an empty table
-      // receives a multi-row paste (the paste brings its own schema). Otherwise
-      // cells map positionally onto the current column order.
-      const headerMode =
-        first.slice(1).some((c) => byLower.has(c.toLowerCase())) ||
-        (columns.length === 0 && grid.length > 1 && first.length > 1 && first.every((c) => c !== ''));
-      const keys: Array<string | null> = headerMode
-        ? first.map((h, i) => (i === 0 || !h || h.startsWith('$') ? null : byLower.get(h.toLowerCase())?.key ?? h))
-        : first.map((_, i) => (i === 0 ? null : columns[i - 1]?.key ?? null));
-      const dataRows = headerMode ? grid.slice(1) : grid;
-      if (dataRows.length === 0) return;
-
-      // New columns declare themselves, kind inferred from the pasted values.
-      const added: PropertyTypes = {};
-      keys.forEach((key, i) => {
-        if (!key || byLower.has(key.toLowerCase()) || types[key]) return;
-        added[key] = { kind: inferPasteKind(dataRows.map((r) => r[i] ?? '')) };
-      });
-      let nextTypes = types;
-      if (Object.keys(added).length > 0) {
-        nextTypes = { ...types, ...added };
+      if (Object.keys(plan.addedTypes).length > 0) {
+        const nextTypes = { ...types, ...plan.addedTypes };
         await savePropertyTypes(fs, nextTypes);
         setTypes(nextTypes);
-        onTableConfig?.({
-          columns: [
-            ...columns.map(({ key, width }) => ({ key, width })),
-            ...Object.keys(added).map((key) => ({ key, width: TABLE_COLUMN_DEFAULT_WIDTH })),
-          ],
-        });
+        if (plan.columns) onTableConfig?.({ columns: plan.columns });
       }
-
-      const invalid: string[] = [];
-      for (const row of dataRows) {
-        const title = (row[0] ?? '').trim() || 'Untitled';
-        const patch: Record<string, unknown> = {};
-        keys.forEach((key, i) => {
-          if (!key) return;
-          const kind = byLower.get(key.toLowerCase())?.kind ?? nextTypes[key]?.kind ?? 'text';
-          const currency = byLower.get(key.toLowerCase())?.currency ?? nextTypes[key]?.currency ?? 'EUR';
-          const parsed = pasteCellValue(kind, row[i] ?? '', currency);
-          if (!parsed.ok) {
-            invalid.push(`${key}: ${parsed.message}`);
-            return;
-          }
-          if (parsed.value) patch[key] = propertyToYaml(parsed.value);
-        });
-        // Compose before creation: every pasted note costs one file write + one rescan.
-        const notePath = await createNote(fs, dir, title, Object.keys(patch).length > 0 ? updateFrontmatter('', patch) : '');
-        await rescanFile(platform.db, fs, notePath);
-      }
-      if (invalid.length > 0) {
-        setError(`Paste skipped ${invalid.length} invalid cell${invalid.length === 1 ? '' : 's'} — ${invalid[0]}`);
-      }
-    });
+      await commitTableOperation(fs, dir, plan);
+    }, pasteNotice(plan.invalid));
   };
 
   const addColumn = (name: string, kind: EditablePropertyKind, currency: string): void => {
@@ -462,8 +279,7 @@ function TableLayout({ items, groups, folderId = null, crossFolder = false, onOp
     setConfirmDelete(false);
     setSelected(new Set<string>());
     void run(async () => {
-      const fs = await getVaultFs();
-      for (const t of targets) await trashFile(fs, t.item.contentRef!);
+      await trashVaultFiles(await getVaultFs(), targets.map((target) => target.item.contentRef!));
     });
   };
 
@@ -591,7 +407,7 @@ function AddColumnForm({ existing, onSubmit, onClose }: { existing: string[]; on
   const taken = existing.includes(clean);
   const invalid = clean === '' || clean.startsWith('$') || taken;
   return (
-    <div style={{ position: 'absolute', top: 8, right: 12, zIndex: 5, display: 'flex', flexDirection: 'column', gap: 8, padding: '0.75rem', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', boxShadow: '0 8px 24px rgba(0,0,0,0.18)', width: 230 }}>
+    <div style={{ position: 'absolute', top: 8, right: 12, zIndex: 5, display: 'flex', flexDirection: 'column', gap: 8, padding: '0.75rem', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', boxShadow: 'var(--shadow-menu)', width: 230 }}>
       <strong style={{ fontSize: '0.82rem' }}>New property column</strong>
       <input autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="name (frontmatter key)" style={selectStyle} />
       <select value={kind} onChange={(e) => setKind(e.target.value as EditablePropertyKind)} style={selectStyle}>

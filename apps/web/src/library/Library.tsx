@@ -5,15 +5,11 @@
  * dev harness as the app's face (harness stays at ?dev).
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { scanVault, type FilterNode } from '@waffle/core';
-import { FilterPopover, getLayout, listLayouts, ViewTabs, type FilterCondition, type FilterField, type GroupSection, type LibraryItem, type TableViewConfig } from '@waffle/ui';
+import type { FilterNode } from '@waffle/core';
+import { FilterPopover, getLayout, listLayouts, ViewTabs, type FilterCondition, type FilterField, type LibraryItem, type TableViewConfig } from '@waffle/ui';
 import { getVaultFs, platform, platformReady, setVaultFs, type PlatformStatus } from '../platform/instance';
 import { fsAccessSupported, pickRealFolder, restoreRealFolder } from '../platform/web/fsAccessFs';
-import { runThumbnailer } from '../thumbs/thumbnailer';
-import {
-  createView, deleteView, inFolderFilter, listViews, loadFolderTree, loadGroupSections, loadItems, loadPropertyKeys, renameView, saveViewState, setDefaultView,
-  type FolderNode, type FolderView, type ViewCfg,
-} from './queries';
+import { inFolderFilter, loadPropertyKeys, type ViewCfg } from './queries';
 import { loadThumb } from './thumbLoader';
 import { FolderTree } from './FolderTree';
 import { AddMenu, type AddAction } from './AddMenu';
@@ -22,8 +18,8 @@ import { NoteEditor } from '../editor/NoteEditor';
 import { LinkDetail } from '../editor/LinkDetail';
 import { findNoteByTitle } from '../editor/resolve';
 import { ImportDialog } from './ImportDialog';
-import { syncObsidian } from '../importer/obsidianImport';
-import { writeBackView, writeBackViewRemoval } from '../importer/baseWriteback';
+import { useLibraryViews } from './useLibraryViews';
+import { reconcileActiveVault } from './vaultLifecycle';
 import './TableLayout'; // registers the 'table' layout (same load-time pattern as @waffle/ui's entries)
 
 /** cfg.filters is a flat AND of cmps in v1 — the popover edits exactly that. */
@@ -45,29 +41,34 @@ const toFilterNode = (conditions: FilterCondition[]): FilterNode | null =>
 export function Library() {
   const [status, setStatus] = useState<PlatformStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [roots, setRoots] = useState<FolderNode[]>([]);
-  const [selected, setSelected] = useState<string | null>(null);
-  // null = loading (never show "empty" while a query is in flight)
-  const [items, setItems] = useState<LibraryItem[] | null>(null);
-  const [groups, setGroups] = useState<GroupSection[] | null>(null);
-  const [views, setViews] = useState<FolderView[]>([]);
-  const [activeId, setActiveId] = useState<string | null>(null);
   const [filterOpen, setFilterOpen] = useState(false);
   const [fields, setFields] = useState<FilterField[]>([]);
   const [openNote, setOpenNote] = useState<{ path: string; title: string } | null>(null);
   const [openLink, setOpenLink] = useState<{ item: LibraryItem; url: string } | null>(null);
   const [importOpen, setImportOpen] = useState(false);
-
-  const selectedRef = useRef(selected);
-  selectedRef.current = selected;
-  // Latest views/active, immune to stale closures: two rapid patches (layout
-  // then sort) must compose, not overwrite each other.
-  const viewsRef = useRef(views);
-  viewsRef.current = views;
-  const activeIdRef = useRef(activeId);
-  activeIdRef.current = activeId;
-
-  const activeView = views.find((v) => v.id === activeId) ?? null;
+  const {
+    roots,
+    selected,
+    items,
+    groups,
+    views,
+    activeId,
+    activeView,
+    folderName,
+    targetDir,
+    totalCount,
+    markItemsLoading,
+    openFolder,
+    refreshRoots,
+    refreshAll,
+    refreshQuiet,
+    switchView,
+    patchActive,
+    createNamedView,
+    deleteNamedView,
+    setDefaultNamedView,
+    renameNamedView,
+  } = useLibraryViews();
 
   const onOpenItem = (item: LibraryItem): void => {
     // Notes → editor. Links → detail view (docs/10). Files/dash open in later slices.
@@ -90,71 +91,8 @@ export function Library() {
     if (target) setOpenNote({ path: target, title: name });
   };
 
-  /** Adds target the selected folder when it's vault-backed; vault root otherwise. */
-  const targetDir = (): string => {
-    if (selected === null) return '';
-    const find = (list: FolderNode[]): FolderNode | null => {
-      for (const n of list) {
-        if (n.id === selected) return n;
-        const hit = find(n.children);
-        if (hit) return hit;
-      }
-      return null;
-    };
-    return find(roots)?.vaultPath ?? '';
-  };
-
-  const activeViewRef = (): FolderView | null => viewsRef.current.find((v) => v.id === activeIdRef.current) ?? null;
-
-  /** One query path for every load site: items + (when the layout renders them) group sections. */
-  const queryRows = async (folderId: string | null, view: FolderView): Promise<{ items: LibraryItem[]; groups: GroupSection[] | null }> => {
-    const loaded = await loadItems(folderId, view.cfg);
-    if (view.cfg.groupBy && getLayout(view.layout).groupable) return { ...(await loadGroupSections(folderId, view.cfg.groupBy, loaded)) };
-    return { items: loaded, groups: null };
-  };
-
-  const openFolder = useCallback(async (folderId: string | null) => {
-    setSelected(folderId);
-    setItems(null);
-    setFilterOpen(false);
-    const list = await listViews(folderId);
-    const initial = list.find((v) => v.isDefault) ?? list[0]!;
-    setViews(list);
-    setActiveId(initial.id);
-    const loaded = await queryRows(folderId, initial);
-    setItems(loaded.items);
-    setGroups(loaded.groups);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  const refreshAll = useCallback(async () => {
-    setRoots(await loadFolderTree());
-    await openFolder(selectedRef.current);
-  }, [openFolder]);
-
-  // Post-write refresh that swaps rows IN PLACE — no null flash, so the table
-  // keeps its scroll position, selection, and mounted editors across edits.
-  const refreshQuiet = useCallback(async () => {
-    setRoots(await loadFolderTree());
-    const view = activeViewRef();
-    if (!view) return;
-    const loaded = await queryRows(selectedRef.current, view);
-    setItems(loaded.items);
-    setGroups(loaded.groups);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  /** Scan the active vault, sync Obsidian config (types.json, .base → views), thumbnails, refresh. */
   const syncVault = useCallback(async () => {
-    const fs = await getVaultFs();
-    await scanVault(platform.db, fs);
-    try {
-      await syncObsidian(fs, platform.db);
-    } catch (e) {
-      // Config sync must never block the scan; the report dialog surfaces details.
-      console.warn('obsidian sync failed', e);
-    }
-    const generated = await runThumbnailer(platform.db, fs);
+    const generated = await reconcileActiveVault();
     await refreshAll();
     return generated;
   }, [refreshAll]);
@@ -168,7 +106,7 @@ export function Library() {
     (async () => {
       try {
         setStatus(await platformReady);
-        setRoots(await loadFolderTree());
+        await refreshRoots();
         await openFolder(null);
         // Re-attach a previously picked real folder (silent; falls back to OPFS),
         // then catch up on any thumbs the last session didn't generate.
@@ -185,7 +123,7 @@ export function Library() {
   const onAdd = async (action: AddAction): Promise<void> => {
     try {
       const fs = await getVaultFs();
-      const dir = targetDir();
+      const dir = targetDir;
       if (action.kind === 'note') {
         const notePath = await createNote(fs, dir, action.name);
         await syncVault();
@@ -212,7 +150,7 @@ export function Library() {
     try {
       const fs = await pickRealFolder();
       setVaultFs(fs);
-      setItems(null);
+      markItemsLoading();
       await syncVault();
     } catch (e) {
       if (e instanceof Error && e.name === 'AbortError') return; // user cancelled the picker
@@ -220,88 +158,9 @@ export function Library() {
     }
   };
 
-  // ── View manager ──────────────────────────────────────────────────────────
-
-  const switchView = async (id: string): Promise<void> => {
-    setActiveId(id);
-    setFilterOpen(false);
-    const view = viewsRef.current.find((v) => v.id === id);
-    if (!view) return;
-    const loaded = await queryRows(selectedRef.current, view);
-    setItems(loaded.items);
-    setGroups(loaded.groups);
-  };
-
-  /** Patch the active view (optimistic), persist, and requery when results can change. */
-  const patchActive = async (patch: Partial<ViewCfg> & { layout?: string }): Promise<void> => {
-    const current = viewsRef.current.find((v) => v.id === activeIdRef.current);
-    if (!current) return;
-    const { layout, ...cfgPatch } = patch;
-    const next: FolderView = { ...current, layout: layout ?? current.layout, cfg: { ...current.cfg, ...cfgPatch } };
-    setViews(viewsRef.current.map((v) => (v.id === next.id ? next : v)));
-    await saveViewState(next.id, next.layout, next.cfg);
-    // Derived views write back into their .base (maximum sync); a 'frozen'
-    // outcome means the state is inexpressible there — the view is simply
-    // Waffle-owned from here on, per the ownership rule.
-    if (next.cfg.origin) {
-      try {
-        if ((await writeBackView(await getVaultFs(), next)) === 'synced') setViews(await listViews(selectedRef.current));
-      } catch (e) {
-        console.warn('base write-back failed', e);
-      }
-    }
-    // Layout switches requery too when grouped: sections exist only for groupable layouts.
-    if ('sort' in cfgPatch || 'filters' in cfgPatch || 'groupBy' in cfgPatch || (layout !== undefined && next.cfg.groupBy)) {
-      const loaded = await queryRows(selectedRef.current, next);
-      setItems(loaded.items);
-      setGroups(loaded.groups);
-    }
-  };
-
-  const onCreateView = async (name: string): Promise<void> => {
-    const view = await createView(selectedRef.current, name);
-    setViews([...viewsRef.current, view]);
-    await switchView(view.id);
-  };
-
-  const onDeleteView = async (id: string): Promise<void> => {
-    const target = viewsRef.current.find((v) => v.id === id);
-    // Derived views must also leave the .base, or the next sync resurrects them.
-    if (target?.cfg.origin) {
-      try {
-        await writeBackViewRemoval(await getVaultFs(), target);
-      } catch (e) {
-        console.warn('base write-back (removal) failed', e);
-      }
-    }
-    await deleteView(id);
-    const remaining = viewsRef.current.filter((v) => v.id !== id);
-    setViews(remaining);
-    const fallback = remaining.find((v) => v.isDefault) ?? remaining[0];
-    if (fallback) await switchView(fallback.id);
-  };
-
-  const onSetDefaultView = async (id: string): Promise<void> => {
-    await setDefaultView(selectedRef.current, id);
-    setViews(viewsRef.current.map((v) => ({ ...v, isDefault: v.id === id })));
-  };
-
-  const onRenameView = async (id: string, name: string): Promise<void> => {
-    await renameView(id, name);
-    setViews(viewsRef.current.map((v) => (v.id === id ? { ...v, name } : v)));
-    const renamed = viewsRef.current.find((v) => v.id === id);
-    if (renamed?.cfg.origin) {
-      try {
-        if ((await writeBackView(await getVaultFs(), { ...renamed, name })) === 'synced') setViews(await listViews(selectedRef.current));
-      } catch (e) {
-        console.warn('base write-back (rename) failed', e);
-      }
-    }
-  };
-
   const openFilters = async (): Promise<void> => {
     if (!filterOpen) {
-      const props = await loadPropertyKeys(inFolderFilter(activeViewRef()?.cfg.filters ?? null) === null ? selectedRef.current : null);
+      const props = await loadPropertyKeys(inFolderFilter(activeView?.cfg.filters ?? null) === null ? selected : null);
       setFields([
         { key: '$title', kind: 'title' },
         { key: '$type', kind: 'type' },
@@ -319,13 +178,11 @@ export function Library() {
 
   const layout = getLayout(activeView?.layout ?? 'masonry');
   const LayoutComponent = layout.component;
-  const folderName = selected === null ? 'Everything' : findName(roots, selected) ?? '…';
   const cfg = activeView?.cfg ?? null;
   const conditionCount = cfg ? filterCount(cfg.filters) : 0;
   const grouped = !!cfg?.groupBy && !!layout.groupable;
   const sortValue = cfg?.sort.key === '$title' ? '$title' : cfg?.sort.key === '$updated' ? '$updated' : 'prop';
   const tableConfig: TableViewConfig = { columns: cfg?.columns, sort: cfg?.sort ?? null, groupBy: cfg?.groupBy ?? null };
-  const totalCount = countTree(roots);
 
   return (
     <div style={{ display: 'flex', height: '100vh' }}>
@@ -334,7 +191,15 @@ export function Library() {
           🧇 Waffle
         </div>
         <div style={{ flex: 1, minHeight: 0 }}>
-          <FolderTree roots={roots} selectedId={selected} totalCount={totalCount} onSelect={(id) => void openFolder(id)} />
+          <FolderTree
+            roots={roots}
+            selectedId={selected}
+            totalCount={totalCount}
+            onSelect={(id) => {
+              setFilterOpen(false);
+              void openFolder(id);
+            }}
+          />
         </div>
         <button
           onClick={() => setImportOpen(true)}
@@ -436,11 +301,14 @@ export function Library() {
           <ViewTabs
             views={views.map((v) => ({ id: v.id, name: v.name, isDefault: v.isDefault }))}
             activeId={activeId}
-            onSelect={(id) => void switchView(id)}
-            onCreate={(name) => void onCreateView(name)}
-            onRename={(id, name) => void onRenameView(id, name)}
-            onDelete={(id) => void onDeleteView(id)}
-            onSetDefault={(id) => void onSetDefaultView(id)}
+            onSelect={(id) => {
+              setFilterOpen(false);
+              void switchView(id);
+            }}
+            onCreate={(name) => void createNamedView(name)}
+            onRename={(id, name) => void renameNamedView(id, name)}
+            onDelete={(id) => void deleteNamedView(id)}
+            onSetDefault={(id) => void setDefaultNamedView(id)}
           />
         )}
 
@@ -498,23 +366,4 @@ export function Library() {
       </main>
     </div>
   );
-}
-
-function countTree(roots: FolderNode[]): number {
-  let total = 0;
-  const walk = (n: FolderNode): void => {
-    total += n.count;
-    n.children.forEach(walk);
-  };
-  roots.forEach(walk);
-  return total;
-}
-
-function findName(roots: FolderNode[], id: string): string | null {
-  for (const root of roots) {
-    if (root.id === id) return root.name === '/' ? 'Vault' : root.name;
-    const found = findName(root.children, id);
-    if (found) return found;
-  }
-  return null;
 }

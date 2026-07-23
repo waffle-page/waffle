@@ -1,12 +1,13 @@
 # Recipe: extend the Obsidian sync
 
-The sync quarantine is three files:
+The sync quarantine is three files; the Library controller is its caller seam:
 
 | Responsibility | File |
 | --- | --- |
 | Reconcile `.obsidian/types.json` + `*.base` into saved views | `apps/web/src/importer/obsidianImport.ts` |
 | Pure Bases grammar and built-in-field mapping | `apps/web/src/importer/basesCompatibility.ts` |
 | Patch owned view fields back into the canonical `.base` | `apps/web/src/importer/baseWriteback.ts` |
+| Trigger write-back when a derived view is edited/removed | `apps/web/src/library/useLibraryViews.ts` |
 
 They rewrite USER FILES. Three invariants outrank every feature:
 

@@ -2,7 +2,9 @@
  * Airtable-style table over library rows (docs/12: notes as rows). Pure
  * presentation: rows and columns arrive as props; mutation callbacks keep
  * vault writes in the app. Row-virtualized like VirtualList, with interaction
- * state delegated to the quarantined tableGridState.ts state machine.
+ * state delegated to tableGridState.ts, clipboard spelling to
+ * tableClipboard.ts, and column pointer sessions to
+ * useTableColumnInteractions.ts.
  * Executable contract: docs/recipes/verify-table-interactions.md.
  */
 import {
@@ -17,7 +19,6 @@ import {
   type ClipboardEvent,
   type KeyboardEvent,
   type MouseEvent,
-  type PointerEvent as ReactPointerEvent,
   type ReactNode,
 } from 'react';
 import { defaultRangeExtractor, useVirtualizer, type Range } from '@tanstack/react-virtual';
@@ -25,12 +26,11 @@ import type { PropertyValue } from '@waffle/core';
 import {
   TABLE_COLUMN_MAX_WIDTH,
   TABLE_COLUMN_MIN_WIDTH,
-  normalizeTableColumnWidth,
   type GroupSection,
   type LibraryItem,
   type TableColumnConfig,
 } from './types';
-import { EDITABLE_KINDS, formatProperty, PropertyCell } from './PropertyCell';
+import { EDITABLE_KINDS, PropertyCell } from './PropertyCell';
 import {
   EMPTY_TABLE_GRID_STATE,
   sameTableGridCell,
@@ -43,6 +43,8 @@ import {
 } from './tableGridState';
 import { isOpenable } from './ToppingCard';
 import { DashIcon, FileIcon, LinkIcon, NoteIcon, PlusIcon } from './icons';
+import { parseClipboardTsv, propertyToTsv } from './tableClipboard';
+import { useTableColumnInteractions } from './useTableColumnInteractions';
 
 export interface TableColumn extends TableColumnConfig {
   kind: PropertyValue['kind'];
@@ -102,27 +104,6 @@ const TYPE_ICON = { note: NoteIcon, link: LinkIcon, file: FileIcon, dash: DashIc
 /** One virtualized line: a group header or a data row. */
 type Entry = { header: string; count: number } | { row: TableRowData };
 
-function parseClipboardTsv(text: string): string[][] {
-  const lines = text.replace(/\r/g, '').split('\n');
-  if (lines.at(-1) === '') lines.pop();
-  return lines.length === 0 || lines.every((line) => line === '') ? [] : lines.map((line) => line.split('\t'));
-}
-
-/** Canonical, parseable clipboard text; display formatting is deliberately locale-specific. */
-function propertyToTsv(value: PropertyValue): string {
-  switch (value.kind) {
-    case 'text': case 'url': return value.value;
-    case 'select': return value.option;
-    case 'number': return String(value.value);
-    case 'checkbox': return value.value ? 'true' : 'false';
-    case 'money': return String(value.amount);
-    case 'date': return value.iso;
-    case 'list': return JSON.stringify(value.values);
-    case 'unsupported': return JSON.stringify(value.value) ?? '';
-    default: return formatProperty(value);
-  }
-}
-
 function domCellPart(value: string): string {
   return `${value.length}-${encodeURIComponent(value)}`;
 }
@@ -151,14 +132,16 @@ export function PropertyTable({
   const gridDomId = useId();
   const [grid, dispatchGrid] = useReducer(tableGridReducer, EMPTY_TABLE_GRID_STATE);
   const [draft, setDraft] = useState('');
-  const [resizeDraft, setResizeDraft] = useState<{ key: string; width: number } | null>(null);
-  const [draggedKey, setDraggedKey] = useState<string | null>(null);
-  const [dropTarget, setDropTarget] = useState<{ key: string; edge: 'before' | 'after' } | null>(null);
-  const resizeSession = useRef<{ key: string; startX: number; startWidth: number; width: number } | null>(null);
-  const resizeCleanup = useRef<(() => void) | null>(null);
-  const columnDragCleanup = useRef<(() => void) | null>(null);
-  const dropTargetRef = useRef<{ key: string; edge: 'before' | 'after' } | null>(null);
-  const suppressHeaderClick = useRef(false);
+  const {
+    columnWidths,
+    draggedKey,
+    dropTarget,
+    resizeDraft,
+    persistColumnWidth,
+    startColumnDrag,
+    startColumnResize,
+    suppressesHeaderClick,
+  } = useTableColumnInteractions(columns, onColumnsChange);
 
   const rowIds = useMemo(() => rows.map((row) => row.item.id), [rows]);
   const columnKeys = useMemo(() => [TITLE_SORT_KEY, ...columns.map((column) => column.key)], [columns]);
@@ -166,11 +149,6 @@ export function PropertyTable({
   const rowById = useMemo(() => new Map(rows.map((row) => [row.item.id, row])), [rows]);
   const rowIndexById = useMemo(() => new Map(rows.map((row, index) => [row.item.id, index])), [rows]);
   const columnByKey = useMemo(() => new Map(columns.map((column) => [column.key, column])), [columns]);
-  const columnWidths = useMemo(
-    () => columns.map((column) => resizeDraft?.key === column.key ? resizeDraft.width : column.width),
-    [columns, resizeDraft],
-  );
-
   useEffect(() => {
     dispatchGrid({ type: 'reconcile', projection });
   }, [projection]);
@@ -262,148 +240,6 @@ export function PropertyTable({
     height: '100%',
   };
 
-  /**
-   * Column interaction invariants: Title never participates; pointer motion is
-   * draft-only; release/drop emits at most one complete config; window-scoped
-   * sessions survive the handle/header moving away from the original target.
-   */
-  const persistColumnWidth = (key: string, width: number): void => {
-    const normalized = normalizeTableColumnWidth(width);
-    if (columns.find((column) => column.key === key)?.width === normalized) return;
-    onColumnsChange?.(columns.map((column) => ({
-      key: column.key,
-      width: column.key === key ? normalized : column.width,
-    })));
-  };
-
-  const startColumnResize = (event: ReactPointerEvent<HTMLSpanElement>, column: TableColumn): void => {
-    if (!onColumnsChange) return;
-    event.preventDefault();
-    event.stopPropagation();
-    event.currentTarget.focus({ preventScroll: true });
-    const pointerId = event.pointerId;
-    resizeSession.current = {
-      key: column.key,
-      startX: event.clientX,
-      startWidth: column.width,
-      width: column.width,
-    };
-    setResizeDraft({ key: column.key, width: column.width });
-
-    const cleanup = (): void => {
-      window.removeEventListener('pointermove', move);
-      window.removeEventListener('pointerup', finish);
-      window.removeEventListener('pointercancel', cancel);
-      resizeCleanup.current = null;
-    };
-    const move = (moveEvent: globalThis.PointerEvent): void => {
-      const session = resizeSession.current;
-      if (!session || moveEvent.pointerId !== pointerId) return;
-      moveEvent.preventDefault();
-      const width = normalizeTableColumnWidth(session.startWidth + moveEvent.clientX - session.startX);
-      session.width = width;
-      setResizeDraft({ key: session.key, width });
-    };
-    const finish = (finishEvent: globalThis.PointerEvent): void => {
-      const session = resizeSession.current;
-      if (!session || finishEvent.pointerId !== pointerId) return;
-      session.width = normalizeTableColumnWidth(session.startWidth + finishEvent.clientX - session.startX);
-      cleanup();
-      resizeSession.current = null;
-      setResizeDraft(null);
-      persistColumnWidth(session.key, session.width);
-    };
-    const cancel = (cancelEvent: globalThis.PointerEvent): void => {
-      if (cancelEvent.pointerId !== pointerId) return;
-      cleanup();
-      resizeSession.current = null;
-      setResizeDraft(null);
-    };
-    resizeCleanup.current?.();
-    resizeCleanup.current = cleanup;
-    window.addEventListener('pointermove', move);
-    window.addEventListener('pointerup', finish);
-    window.addEventListener('pointercancel', cancel);
-  };
-
-  const dropColumn = (sourceKey: string, targetKey: string, edge: 'before' | 'after'): void => {
-    if (!onColumnsChange || sourceKey === targetKey) return;
-    const source = columns.find((column) => column.key === sourceKey);
-    if (!source) return;
-    const remaining = columns.filter((column) => column.key !== sourceKey);
-    const targetIndex = remaining.findIndex((column) => column.key === targetKey);
-    if (targetIndex < 0) return;
-    const insertAt = targetIndex + (edge === 'after' ? 1 : 0);
-    const reordered = [...remaining.slice(0, insertAt), source, ...remaining.slice(insertAt)];
-    if (reordered.every((column, index) => column.key === columns[index]?.key)) return;
-    onColumnsChange(reordered.map(({ key, width }) => ({ key, width })));
-  };
-
-  const startColumnDrag = (event: ReactPointerEvent<HTMLDivElement>, column: TableColumn): void => {
-    if (!onColumnsChange || event.button !== 0) return;
-    const pointerId = event.pointerId;
-    const startX = event.clientX;
-    const startY = event.clientY;
-    let dragging = false;
-
-    const cleanup = (): void => {
-      window.removeEventListener('pointermove', move);
-      window.removeEventListener('pointerup', finish);
-      window.removeEventListener('pointercancel', cancel);
-      columnDragCleanup.current = null;
-    };
-    const targetAt = (clientX: number, clientY: number): { key: string; edge: 'before' | 'after' } | null => {
-      const element = document.elementFromPoint(clientX, clientY)?.closest<HTMLElement>('[data-table-column-key]');
-      const key = element?.dataset.tableColumnKey;
-      if (!element || !key || key === column.key) return null;
-      const rect = element.getBoundingClientRect();
-      return { key, edge: clientX < rect.left + rect.width / 2 ? 'before' : 'after' };
-    };
-    const move = (moveEvent: globalThis.PointerEvent): void => {
-      if (moveEvent.pointerId !== pointerId) return;
-      if (!dragging && Math.hypot(moveEvent.clientX - startX, moveEvent.clientY - startY) < 6) return;
-      moveEvent.preventDefault();
-      dragging = true;
-      setDraggedKey(column.key);
-      const target = targetAt(moveEvent.clientX, moveEvent.clientY);
-      dropTargetRef.current = target;
-      setDropTarget(target);
-    };
-    const finish = (finishEvent: globalThis.PointerEvent): void => {
-      if (finishEvent.pointerId !== pointerId) return;
-      cleanup();
-      if (dragging) {
-        finishEvent.preventDefault();
-        const target = dropTargetRef.current ?? targetAt(finishEvent.clientX, finishEvent.clientY);
-        if (target) dropColumn(column.key, target.key, target.edge);
-        suppressHeaderClick.current = true;
-        window.setTimeout(() => {
-          suppressHeaderClick.current = false;
-        }, 0);
-      }
-      dropTargetRef.current = null;
-      setDraggedKey(null);
-      setDropTarget(null);
-    };
-    const cancel = (cancelEvent: globalThis.PointerEvent): void => {
-      if (cancelEvent.pointerId !== pointerId) return;
-      cleanup();
-      dropTargetRef.current = null;
-      setDraggedKey(null);
-      setDropTarget(null);
-    };
-    columnDragCleanup.current?.();
-    columnDragCleanup.current = cleanup;
-    window.addEventListener('pointermove', move);
-    window.addEventListener('pointerup', finish);
-    window.addEventListener('pointercancel', cancel);
-  };
-
-  useEffect(() => () => {
-    resizeCleanup.current?.();
-    columnDragCleanup.current?.();
-  }, []);
-
   const headerCell = (key: string, label: ReactNode, columnIndex: number, column?: TableColumn): ReactNode => {
     const draggable = !!column && !!onColumnsChange;
     const isDropTarget = dropTarget?.key === key && draggedKey !== key;
@@ -415,7 +251,7 @@ export function PropertyTable({
         aria-sort={sort?.key === key ? (sort.dir === 'asc' ? 'ascending' : 'descending') : 'none'}
         data-table-column-key={column?.key}
         onClick={() => {
-          if (suppressHeaderClick.current) return;
+          if (suppressesHeaderClick()) return;
           onSort(key);
         }}
         onPointerDown={column ? (event) => startColumnDrag(event, column) : undefined}

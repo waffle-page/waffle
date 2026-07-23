@@ -71,7 +71,7 @@ export function AddMenu({ onAdd }: { onAdd: (action: AddAction) => void }) {
         }}
       />
       {open && (
-        <div style={{ position: 'absolute', right: 0, top: '110%', zIndex: 20, width: 240, background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: '0.4rem', boxShadow: '0 8px 24px rgba(0,0,0,0.12)' }}>
+        <div style={{ position: 'absolute', right: 0, top: '110%', zIndex: 20, width: 240, background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: '0.4rem', boxShadow: 'var(--shadow-menu-soft)' }}>
           {form === null ? (
             <>
               <button style={item} onClick={() => setForm('note')}>📝 New note</button>

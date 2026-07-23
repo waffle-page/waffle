@@ -3,13 +3,17 @@
 This is the executable specification for Waffle's table interaction quarantine:
 
 - `packages/ui/src/tableGridState.ts` owns pure selection/editing transitions.
-- `packages/ui/src/PropertyTable.tsx` owns DOM events, focus, clipboard
-  serialization, and row virtualization.
-- `apps/web/src/library/TableLayout.tsx` owns typed paste planning, optimistic
-  projection, note creation, pending-operation accounting, and canonical
-  reconciliation after mutations settle.
-- `apps/web/src/library/propertyWrite.ts` owns the file-first property write
-  and the per-vault-path serialization queue.
+- `packages/ui/src/tableClipboard.ts` owns canonical TSV spelling/parsing.
+- `packages/ui/src/useTableColumnInteractions.ts` owns resize/drag pointer
+  sessions and emits one complete column-config patch.
+- `packages/ui/src/PropertyTable.tsx` owns grid DOM events, focus, and row
+  virtualization.
+- `apps/web/src/library/tableOperations.ts` purely plans row-batched patches
+  and note creation; every patch carries `before` and `after`.
+- `apps/web/src/library/vaultMutations.ts` executes file writes, rescans, and
+  soft deletes, returning receipts for the future undo history.
+- `apps/web/src/library/TableLayout.tsx` owns optimistic projection,
+  pending-operation accounting, canonical requery, and table controls.
 
 Run the relevant sections after any change to those files, table view config,
 property parsing, grouping, or vault rescanning. Slice A/B/C work is not
@@ -39,12 +43,18 @@ complete until this specification passes, along with typecheck and build.
 flowchart LR
     E["Pointer, key, or clipboard event"] --> S["tableGridState transition"]
     E --> P["PropertyTable callback"]
-    P --> O["Optimistic property projection"]
-    P --> C["Compose one patch per note"]
-    C --> W["Write vault file once"]
+    P --> O["tableOperations pure plan"]
+    O --> X["Optimistic after projection"]
+    O --> C["One before/after patch per note"]
+    C --> W["vaultMutations: write file once"]
     W --> R["rescanFile"]
-    R --> Q["Requery and refresh in place"]
+    R --> Q["TableLayout: requery in place"]
 ```
+
+This is also the Slice C insertion point: successful mutation receipts enter
+the session history after `vaultMutations` settles. Undo submits the receipt's
+inverse through the same command boundary; React components never manipulate
+history patches or vault bytes.
 
 ## Cell capabilities
 

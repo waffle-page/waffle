@@ -98,7 +98,7 @@ export function FilterPopover({ fields, conditions, filtersReadOnly = false, gro
     setRows((prev) => prev.map((r, j) => (j === i ? { ...r, ...patch } : r)));
 
   return (
-    <div style={{ position: 'absolute', top: '100%', right: 8, zIndex: 6, display: 'flex', flexDirection: 'column', gap: 8, width: 430, maxWidth: '90vw', padding: '0.75rem', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', boxShadow: '0 8px 24px rgba(0,0,0,0.18)' }}>
+    <div style={{ position: 'absolute', top: '100%', right: 8, zIndex: 6, display: 'flex', flexDirection: 'column', gap: 8, width: 430, maxWidth: '90vw', padding: '0.75rem', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', boxShadow: 'var(--shadow-menu)' }}>
       <strong style={{ fontSize: '0.82rem' }}>Filter</strong>
       {filtersReadOnly && (
         <span style={{ fontSize: '0.78rem', color: 'var(--text-dim)' }}>

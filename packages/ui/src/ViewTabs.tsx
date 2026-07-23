@@ -102,7 +102,7 @@ export function ViewTabs({ views, activeId, onSelect, onCreate, onRename, onDele
       )}
       </div>
       {menuOpen && active && (
-        <div style={{ position: 'absolute', top: '100%', left: menuLeft, zIndex: 6, display: 'flex', flexDirection: 'column', minWidth: 150, padding: 4, background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', boxShadow: '0 8px 24px rgba(0,0,0,0.18)' }}>
+        <div style={{ position: 'absolute', top: '100%', left: menuLeft, zIndex: 6, display: 'flex', flexDirection: 'column', minWidth: 150, padding: 4, background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', boxShadow: 'var(--shadow-menu)' }}>
           {[
             { label: 'Rename', run: () => { setNaming('rename'); setDraft(active.name); } },
             { label: active.isDefault ? 'Default view ✓' : 'Set as default', run: () => onSetDefault(active.id), disabled: active.isDefault },
