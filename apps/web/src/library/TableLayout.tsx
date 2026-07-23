@@ -14,6 +14,7 @@ import {
 } from '@waffle/ui';
 import { getVaultFs, platform } from '../platform/instance';
 import { createNote } from './addFlows';
+import { trashFile } from './deleteFlows';
 import { writeNoteProperty } from './propertyWrite';
 import { loadPropertyMap, vaultDirFor } from './queries';
 
@@ -50,6 +51,7 @@ function TableLayout({ items, groups, folderId = null, onOpen, onMutated, tableC
   const [addOpen, setAddOpen] = useState(false);
   const [bulkKey, setBulkKey] = useState<string | null>(null);
   const [bulkRaw, setBulkRaw] = useState('');
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
   useEffect(() => {
     let dead = false;
@@ -110,6 +112,7 @@ function TableLayout({ items, groups, folderId = null, onOpen, onMutated, tableC
         item,
         props: propMap?.get(item.id) ?? {},
         editable: item.type === 'note' && !!item.contentRef?.endsWith('.md'),
+        deletable: !!item.contentRef,
       })),
     [items, propMap],
   );
@@ -247,6 +250,17 @@ function TableLayout({ items, groups, folderId = null, onOpen, onMutated, tableC
 
   const bulkColumn = columns.find((c) => c.key === bulkKey) ?? null;
   const selectedEditable = rows.filter((r) => selected.has(r.item.id) && r.editable).length;
+  const selectedDeletable = rows.filter((r) => selected.has(r.item.id) && r.deletable);
+
+  const deleteSelected = (): void => {
+    const targets = selectedDeletable;
+    setConfirmDelete(false);
+    setSelected(new Set<string>());
+    void run(async () => {
+      const fs = await getVaultFs();
+      for (const t of targets) await trashFile(fs, t.item.contentRef!);
+    });
+  };
 
   if (propMap === null) return null; // one query in flight; don't flash placeholder dashes
 
@@ -256,8 +270,11 @@ function TableLayout({ items, groups, folderId = null, onOpen, onMutated, tableC
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', padding: '0.45rem 0.75rem', borderBottom: '1px solid var(--border)', background: 'var(--surface)', fontSize: '0.8rem' }}>
           {selected.size > 0 && (
             <>
-              <strong>{selectedEditable} selected</strong>
-              <span style={{ color: 'var(--text-dim)' }}>set</span>
+              <strong>{selected.size} selected</strong>
+              {/* Properties live in note frontmatter; file/link properties await .waffle/meta.json (ADR-013). Say so, don't skip silently. */}
+              <span style={{ color: 'var(--text-dim)' }}>
+                {selectedEditable === 0 ? 'no notes in selection — properties apply to notes only; set' : selectedEditable < selected.size ? `set (on ${selectedEditable} note${selectedEditable > 1 ? 's' : ''})` : 'set'}
+              </span>
               <select value={bulkKey ?? ''} onChange={(e) => setBulkKey(e.target.value || null)} style={selectStyle}>
                 <option value="">property…</option>
                 {columns.filter((c) => EDITABLE_KINDS.includes(c.kind)).map((c) => (
@@ -296,7 +313,27 @@ function TableLayout({ items, groups, folderId = null, onOpen, onMutated, tableC
               <button disabled={!bulkColumn || busy} onClick={() => applyBulk(null)} style={{ ...chipStyle, opacity: !bulkColumn || busy ? 0.5 : 1 }}>
                 Clear property
               </button>
-              <button onClick={() => setSelected(new Set<string>())} style={chipStyle}>Deselect</button>
+              {confirmDelete ? (
+                <>
+                  <button
+                    disabled={busy}
+                    onClick={deleteSelected}
+                    style={{ ...chipStyle, background: 'var(--ramp-blush)', color: 'var(--ink-blush)', fontWeight: 600 }}
+                  >
+                    Move {selectedDeletable.length} to .trash — confirm
+                  </button>
+                  <button onClick={() => setConfirmDelete(false)} style={chipStyle}>Cancel</button>
+                </>
+              ) : (
+                <button
+                  disabled={busy || selectedDeletable.length === 0}
+                  onClick={() => setConfirmDelete(true)}
+                  style={{ ...chipStyle, opacity: busy || selectedDeletable.length === 0 ? 0.5 : 1 }}
+                >
+                  Delete…
+                </button>
+              )}
+              <button onClick={() => { setSelected(new Set<string>()); setConfirmDelete(false); }} style={chipStyle}>Deselect</button>
             </>
           )}
           {error && <span style={{ color: 'var(--ink-blush)', marginLeft: 'auto' }}>{error}</span>}
@@ -320,8 +357,8 @@ function TableLayout({ items, groups, folderId = null, onOpen, onMutated, tableC
             })
           }
           onToggleAll={() => {
-            const editable = rows.filter((r) => r.editable).map((r) => r.item.id);
-            setSelected((prev) => (editable.every((id) => prev.has(id)) && editable.length > 0 ? new Set<string>() : new Set(editable)));
+            const selectable = rows.filter((r) => r.editable || r.deletable).map((r) => r.item.id);
+            setSelected((prev) => (selectable.every((id) => prev.has(id)) && selectable.length > 0 ? new Set<string>() : new Set(selectable)));
           }}
           onEditCell={onEditCell}
           canCreate={dir !== null}

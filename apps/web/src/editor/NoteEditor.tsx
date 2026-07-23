@@ -16,6 +16,7 @@ import { EditorView, basicSetup } from 'codemirror';
 import { markdown } from '@codemirror/lang-markdown';
 import { rescanFile } from '@waffle/core';
 import { getVaultFs, platform } from '../platform/instance';
+import { trashFile } from '../library/deleteFlows';
 import { vaultUrl, mimeFor } from './assetUrl';
 import { livePreview } from './livePreview';
 import { liveStyle } from './liveStyle';
@@ -53,6 +54,7 @@ export function NoteEditor({
   const [dirty, setDirty] = useState(false);
   const [recorder, setRecorder] = useState<MediaRecorder | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
   const save = async (content: string): Promise<void> => {
     const fs = await getVaultFs();
@@ -82,6 +84,19 @@ export function NoteEditor({
     }
     view.dispatch({ changes: { from: at, insert } });
     setNotice(`embedded ${files.length} file${files.length > 1 ? 's' : ''}`);
+  };
+
+  /** Move the note to .trash/. The pending save MUST be cancelled first — a
+   * debounced write landing after the move would resurrect the file. */
+  const onDelete = async (): Promise<void> => {
+    if (saveTimerRef.current) {
+      clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = null;
+    }
+    setDirty(false);
+    const fs = await getVaultFs();
+    await trashFile(fs, path);
+    onClose();
   };
 
   /** Flush any pending debounced save, then leave — the host refreshes on close. */
@@ -246,6 +261,18 @@ export function NoteEditor({
         <span style={{ marginLeft: 'auto', fontSize: '0.72rem', color: 'var(--text-dim)', whiteSpace: 'nowrap' }}>
           {notice ?? (dirty ? 'editing…' : savedAt ? `saved ${savedAt}` : path)}
         </span>
+        {confirmDelete ? (
+          <>
+            <button onClick={() => void onDelete()} style={{ ...headerBtn, background: 'var(--ramp-blush)', color: 'var(--ink-blush)', fontWeight: 600 }}>
+              Move to .trash — confirm
+            </button>
+            <button onClick={() => setConfirmDelete(false)} style={headerBtn}>Cancel</button>
+          </>
+        ) : (
+          <button onClick={() => setConfirmDelete(true)} title="Delete note (moves to .trash/ in the vault)" style={headerBtn}>
+            🗑
+          </button>
+        )}
         <button onClick={() => void onRecordToggle()} title={recorder ? 'Stop recording' : 'Record voice memo'} style={{ ...headerBtn, background: recorder ? 'var(--ramp-blush)' : 'var(--surface-2)', color: recorder ? 'var(--ink-blush)' : 'var(--text)' }}>
           {recorder ? '⏹' : '🎙'}
         </button>

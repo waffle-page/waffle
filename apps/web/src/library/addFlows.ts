@@ -16,7 +16,7 @@ function joinDir(dir: string, name: string): string {
   return dir ? `${dir}/${name}` : name;
 }
 
-async function exists(fs: VaultFs, path: string): Promise<boolean> {
+export async function exists(fs: VaultFs, path: string): Promise<boolean> {
   try {
     await fs.read(path);
     return true;
@@ -26,7 +26,7 @@ async function exists(fs: VaultFs, path: string): Promise<boolean> {
 }
 
 /** `name.ext` → `name 2.ext`, `name 3.ext`… until free. */
-async function uniquePath(fs: VaultFs, dir: string, base: string, ext: string): Promise<string> {
+export async function uniquePath(fs: VaultFs, dir: string, base: string, ext: string): Promise<string> {
   for (let n = 1; ; n++) {
     const candidate = joinDir(dir, `${base}${n === 1 ? '' : ` ${n}`}${ext}`);
     if (!(await exists(fs, candidate))) return candidate;

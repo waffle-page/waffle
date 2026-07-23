@@ -27,6 +27,8 @@ export interface TableRowData {
   props: Record<string, PropertyValue>;
   /** Only vault-backed notes take cell edits (frontmatter is their storage). */
   editable: boolean;
+  /** Any vault-backed row can be selected for deletion (its file moves to .trash/). */
+  deletable: boolean;
 }
 
 export interface PropertyTableProps {
@@ -86,8 +88,8 @@ export function PropertyTable({
 
   const totalWidth = W_CHECK + W_TITLE + columns.length * W_PROP + W_ADD;
   const gridTemplate = `${W_CHECK}px ${W_TITLE}px ${columns.map(() => `${W_PROP}px`).join(' ')} ${W_ADD}px`.trim();
-  const editableRows = rows.filter((r) => r.editable);
-  const allSelected = editableRows.length > 0 && editableRows.every((r) => selected.has(r.item.id));
+  const selectableRows = rows.filter((r) => r.editable || r.deletable);
+  const allSelected = selectableRows.length > 0 && selectableRows.every((r) => selected.has(r.item.id));
 
   const rowStyle: CSSProperties = { display: 'grid', gridTemplateColumns: gridTemplate, alignItems: 'center', height: ROW_H, borderBottom: '1px solid var(--border)', fontSize: '0.84rem' };
   const cellPad: CSSProperties = { padding: '0 0.6rem', minWidth: 0, display: 'flex', alignItems: 'center', height: '100%' };
@@ -127,7 +129,7 @@ export function PropertyTable({
       <div style={{ minWidth: totalWidth, width: 'max-content' }}>
         <div style={{ ...rowStyle, position: 'sticky', top: 0, zIndex: 2, background: 'var(--surface)' }}>
           <div style={{ ...cellPad, justifyContent: 'center' }}>
-            <input type="checkbox" checked={allSelected} onChange={onToggleAll} disabled={editableRows.length === 0} style={{ accentColor: 'var(--accent)' }} />
+            <input type="checkbox" checked={allSelected} onChange={onToggleAll} disabled={selectableRows.length === 0} style={{ accentColor: 'var(--accent)' }} />
           </div>
           {headerCell(TITLE_SORT_KEY, 'Title', true)}
           {columns.map((c) => headerCell(c.key, c.key, true))}
@@ -183,7 +185,7 @@ export function PropertyTable({
             return (
               <div key={row.item.id} style={{ ...rowStyle, ...abs, background: selected.has(row.item.id) ? 'var(--surface-2)' : undefined }}>
                 <div style={{ ...cellPad, justifyContent: 'center' }}>
-                  {row.editable && (
+                  {(row.editable || row.deletable) && (
                     <input type="checkbox" checked={selected.has(row.item.id)} onChange={() => onToggleSelect(row.item.id)} style={{ accentColor: 'var(--accent)' }} />
                   )}
                 </div>
