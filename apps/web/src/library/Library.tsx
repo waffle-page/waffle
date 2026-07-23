@@ -21,6 +21,7 @@ import { addFiles, createLink, createNote } from './addFlows';
 import { NoteEditor } from '../editor/NoteEditor';
 import { LinkDetail } from '../editor/LinkDetail';
 import { findNoteByTitle } from '../editor/resolve';
+import { ImportDialog } from './ImportDialog';
 import './TableLayout'; // registers the 'table' layout (same load-time pattern as @waffle/ui's entries)
 
 /** cfg.filters is a flat AND of cmps in v1 — the popover edits exactly that. */
@@ -46,6 +47,7 @@ export function Library() {
   const [fields, setFields] = useState<FilterField[]>([]);
   const [openNote, setOpenNote] = useState<{ path: string; title: string } | null>(null);
   const [openLink, setOpenLink] = useState<{ item: LibraryItem; url: string } | null>(null);
+  const [importOpen, setImportOpen] = useState(false);
 
   const selectedRef = useRef(selected);
   selectedRef.current = selected;
@@ -277,6 +279,12 @@ export function Library() {
         <div style={{ flex: 1, minHeight: 0 }}>
           <FolderTree roots={roots} selectedId={selected} totalCount={totalCount} onSelect={(id) => void openFolder(id)} />
         </div>
+        <button
+          onClick={() => setImportOpen(true)}
+          style={{ margin: '0.5rem 0.75rem 0', padding: '0.4rem 0.6rem', fontSize: '0.78rem', background: 'var(--surface-2)', color: 'var(--text)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', cursor: 'pointer' }}
+        >
+          Import from Obsidian…
+        </button>
         {fsAccessSupported() && (
           <button
             onClick={() => void onPickFolder()}
@@ -420,6 +428,12 @@ export function Library() {
             />
           )}
           {openLink && <LinkDetail key={openLink.item.id} item={openLink.item} url={openLink.url} onClose={() => setOpenLink(null)} />}
+          {importOpen && (
+            <ImportDialog
+              onClose={() => setImportOpen(false)}
+              onImported={() => void refreshAll()}
+            />
+          )}
         </div>
       </main>
     </div>

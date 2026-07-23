@@ -64,6 +64,45 @@ White linen shirt for the #wedding. Pairs with the tan loafers.
 `,
 
   'Finances/net-worth.dash': `{ "widgets": [] }\n`,
+
+  // Obsidian-side config the importer consumes: vault-wide property types
+  // (types.json) and a Bases file with two views. `dietary` (multitext) and
+  // the negated/`file.ext` filters exercise the honest-skip paths.
+  '.obsidian/types.json': `{
+  "types": {
+    "rating": "number",
+    "time_min": "number",
+    "budget": "number",
+    "price": "number",
+    "booked": "checkbox",
+    "start": "date",
+    "color": "text",
+    "dietary": "multitext"
+  }
+}
+`,
+
+  'Recipes/Recetas.base': `filters:
+  and:
+    - 'file.ext == "md"'
+views:
+  - type: table
+    name: Mejores recetas
+    filters:
+      and:
+        - 'rating >= 4.5'
+        - '!file.hasTag("dessert")'
+    order:
+      - file.name
+      - rating
+      - time_min
+    sort:
+      - property: rating
+        direction: DESC
+  - type: cards
+    name: Todas
+    limit: 50
+`,
 };
 
 /** Generated test photos (pixel colors are data, not component styling). */

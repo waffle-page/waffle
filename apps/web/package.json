@@ -24,7 +24,8 @@
     "markdown-it": "^14.3.0",
     "mermaid": "^11.16.0",
     "react": "^19.2.8",
-    "react-dom": "^19.2.8"
+    "react-dom": "^19.2.8",
+    "yaml": "^2.9.0"
   },
   "devDependencies": {
     "@types/markdown-it": "^14.1.2",
