@@ -22,6 +22,7 @@ import { NoteEditor } from '../editor/NoteEditor';
 import { LinkDetail } from '../editor/LinkDetail';
 import { findNoteByTitle } from '../editor/resolve';
 import { ImportDialog } from './ImportDialog';
+import { syncObsidian } from '../importer/obsidianImport';
 import './TableLayout'; // registers the 'table' layout (same load-time pattern as @waffle/ui's entries)
 
 /** cfg.filters is a flat AND of cmps in v1 — the popover edits exactly that. */
@@ -135,16 +136,27 @@ export function Library() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  /** Scan the active vault, generate missing thumbnails, refresh everything. */
+  /** Scan the active vault, sync Obsidian config (types.json, .base → views), thumbnails, refresh. */
   const syncVault = useCallback(async () => {
     const fs = await getVaultFs();
     await scanVault(platform.db, fs);
+    try {
+      await syncObsidian(fs, platform.db);
+    } catch (e) {
+      // Config sync must never block the scan; the report dialog surfaces details.
+      console.warn('obsidian sync failed', e);
+    }
     const generated = await runThumbnailer(platform.db, fs);
     await refreshAll();
     return generated;
   }, [refreshAll]);
 
+  // StrictMode double-invokes mount effects in dev; init (scan + obsidian
+  // sync + thumbs) must run once — concurrent syncs would race their writes.
+  const didInit = useRef(false);
   useEffect(() => {
+    if (didInit.current) return;
+    didInit.current = true;
     (async () => {
       try {
         setStatus(await platformReady);
@@ -281,9 +293,10 @@ export function Library() {
         </div>
         <button
           onClick={() => setImportOpen(true)}
+          title="Obsidian config syncs automatically at every scan — this shows the last result and any skipped constructs"
           style={{ margin: '0.5rem 0.75rem 0', padding: '0.4rem 0.6rem', fontSize: '0.78rem', background: 'var(--surface-2)', color: 'var(--text)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', cursor: 'pointer' }}
         >
-          Import from Obsidian…
+          Obsidian sync report…
         </button>
         {fsAccessSupported() && (
           <button

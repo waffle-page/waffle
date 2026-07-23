@@ -64,6 +64,13 @@ export interface ViewCfg {
   groupBy: string | null;
   /** Table layout: column order; data keys not listed append at render time. */
   columns?: string[];
+  /**
+   * Set on views derived from an Obsidian `.base`: which base+view produced it
+   * and the exact spec last imported. While the view still matches `spec` it is
+   * sync-owned (auto-updates with the file); once edited in Waffle it diverges
+   * and sync must never clobber it (ADR-018's field-ownership rule, for views).
+   */
+  origin?: { base: string; view: string; spec: string };
 }
 
 export interface FolderView {
@@ -79,7 +86,7 @@ const DEFAULT_CFG: ViewCfg = { sort: { key: '$updated', dir: 'desc' }, filters: 
 
 /** Configs written before the view manager stored sort as 'updated'|'title' + a separate colSort. */
 function parseCfg(json: string): ViewCfg {
-  const raw = JSON.parse(json) as { sort?: ViewSort | 'updated' | 'title'; colSort?: ViewSort | null; filters?: FilterNode | null; groupBy?: string | null; columns?: string[] };
+  const raw = JSON.parse(json) as { sort?: ViewSort | 'updated' | 'title'; colSort?: ViewSort | null; filters?: FilterNode | null; groupBy?: string | null; columns?: string[]; origin?: ViewCfg['origin'] };
   let sort: ViewSort =
     raw.sort === 'title' ? { key: '$title', dir: 'asc' }
     : raw.sort && typeof raw.sort === 'object' ? raw.sort
@@ -87,6 +94,7 @@ function parseCfg(json: string): ViewCfg {
   if (raw.colSort) sort = raw.colSort;
   const cfg: ViewCfg = { sort, filters: raw.filters ?? null, groupBy: raw.groupBy ?? null };
   if (raw.columns) cfg.columns = raw.columns;
+  if (raw.origin) cfg.origin = raw.origin;
   return cfg;
 }
 

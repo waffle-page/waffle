@@ -1,18 +1,20 @@
 /**
- * Obsidian importer (P1): vault-wide property types (`.obsidian/types.json`)
- * merge into `.waffle/properties.json`, and Bases (`*.base` YAML) become saved
- * views on today's engine. Two rules keep it honest:
- *  - DRY-RUN FIRST: `scanImport` builds a full plan with per-item skip reasons;
- *    nothing writes until `applyImport`.
- *  - Existing Waffle declarations WIN over imported types (they were deliberate);
- *    re-imports are idempotent (views matched by name are skipped as existing).
- * The Bases filter language is imported as a SUBSET — plain comparisons,
- * hasTag/contains, and/or lists. Everything else is skipped with its reason in
- * the report, never silently dropped.
+ * Obsidian config sync: `.obsidian/types.json` and `*.base` files are vault
+ * files like any other, so their derived state (property declarations, saved
+ * views) keeps itself in sync at scan time — no import button, no staleness.
+ *
+ * Ownership (ADR-018's field-ownership rule, applied to views): a view derived
+ * from a base carries `cfg.origin = {base, view, spec}` — the exact spec last
+ * imported. While the view still matches `spec` it is sync-owned: it auto-
+ * updates when the base changes and auto-removes when its base view vanishes.
+ * The moment it's edited in Waffle it diverges and sync must NEVER touch it
+ * again (reported, not clobbered). Types merge add-only; existing Waffle
+ * declarations always win. The Bases filter language imports as a SUBSET —
+ * everything unsupported is named in the report, never silently dropped.
  */
 import { parse as parseYaml } from 'yaml';
 import { loadPropertyTypes, savePropertyTypes, type PropertyTypeDecl, type PropertyTypes, type SqlDriver, type VaultFs, type FilterNode } from '@waffle/core';
-import { createView, listViews, saveViewState, type ViewCfg } from '../library/queries';
+import { createView, deleteView, listViews, saveViewState, type FolderView, type ViewCfg } from '../library/queries';
 
 const OBSIDIAN_KIND: Record<string, PropertyTypeDecl['kind'] | undefined> = {
   text: 'text',
@@ -25,110 +27,153 @@ const OBSIDIAN_KIND: Record<string, PropertyTypeDecl['kind'] | undefined> = {
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 const CMP: Record<string, 'eq' | 'ne' | 'lt' | 'lte' | 'gt' | 'gte'> = { '==': 'eq', '!=': 'ne', '<': 'lt', '<=': 'lte', '>': 'gt', '>=': 'gte' };
 
-export interface PlannedView {
-  name: string;
-  layout: string;
-  cfg: ViewCfg;
-  notes: string[];
-  exists: boolean;
-}
-
-export interface PlannedBase {
-  path: string;
-  folderId: string;
-  folderName: string;
-  views: PlannedView[];
-  skipped: string[];
-}
-
-export interface ImportPlan {
-  typesFileFound: boolean;
-  typesNew: PropertyTypes;
-  typesKept: string[];
+export interface SyncResult {
+  found: { typesFile: boolean; baseFiles: number };
+  typesAdded: string[];
   typesSkipped: Array<{ key: string; reason: string }>;
-  bases: PlannedBase[];
+  viewsCreated: Array<{ folder: string; name: string }>;
+  viewsUpdated: Array<{ folder: string; name: string }>;
+  /** Base changed but the Waffle view was edited here — user-owned, left alone. */
+  viewsDiverged: Array<{ folder: string; name: string }>;
+  viewsRemoved: Array<{ folder: string; name: string }>;
+  /** Parse compromises, prefixed with their source file. */
+  notes: string[];
 }
 
-export async function scanImport(fs: VaultFs, db: SqlDriver): Promise<ImportPlan> {
+/** Run after every vault scan (Library.syncVault). Idempotent; a no-op vault returns an empty result. */
+export async function syncObsidian(fs: VaultFs, db: SqlDriver): Promise<SyncResult> {
+  const result: SyncResult = {
+    found: { typesFile: false, baseFiles: 0 },
+    typesAdded: [], typesSkipped: [], viewsCreated: [], viewsUpdated: [], viewsDiverged: [], viewsRemoved: [], notes: [],
+  };
   const existing = await loadPropertyTypes(fs);
-  const plan: ImportPlan = { typesFileFound: false, typesNew: {}, typesKept: [], typesSkipped: [], bases: [] };
 
-  // ── .obsidian/types.json ──
+  // ── types.json: add-only merge, existing declarations win ──
   try {
     const raw = JSON.parse(new TextDecoder().decode(await fs.read('.obsidian/types.json'))) as { types?: Record<string, string> };
-    plan.typesFileFound = true;
+    result.found.typesFile = true;
+    const added: PropertyTypes = {};
     for (const [key, obsidianType] of Object.entries(raw.types ?? {})) {
-      if (key === 'tags' || key === 'aliases' || key === 'cssclasses') continue; // Obsidian-internal keys
-      if (existing[key]) {
-        plan.typesKept.push(key);
-        continue;
-      }
+      if (key === 'tags' || key === 'aliases' || key === 'cssclasses' || existing[key]) continue;
       const kind = OBSIDIAN_KIND[obsidianType];
-      if (kind) plan.typesNew[key] = { kind };
-      else plan.typesSkipped.push({ key, reason: `Obsidian type "${obsidianType}" has no Waffle kind yet` });
+      if (kind) added[key] = { kind };
+      else result.typesSkipped.push({ key, reason: `Obsidian type "${obsidianType}" has no Waffle kind yet` });
+    }
+    if (Object.keys(added).length > 0) {
+      await savePropertyTypes(fs, { ...added, ...existing });
+      result.typesAdded = Object.keys(added);
     }
   } catch {
-    // no types.json — fine, bases may still exist
+    // no types.json — fine
   }
-
   // ── *.base files (already indexed as file toppings by the scanner) ──
   const baseRows = await db.exec<{ content_ref: string; folder_id: string; folder_name: string }>(
     `SELECT t.content_ref, t.folder_id, f.name AS folder_name FROM toppings t JOIN folders f ON f.id = t.folder_id
      WHERE t.source = 'vault' AND t.deleted_at IS NULL AND t.content_ref LIKE '%.base' ORDER BY t.content_ref`,
   );
-  const kinds = { ...existing, ...plan.typesNew };
+  result.found.baseFiles = baseRows.length;
+  const mergedKinds = await loadPropertyTypes(fs); // includes the just-added keys
+
+  interface Desired { folderId: string; folderName: string; base: string; view: string; name: string; layout: string; cfg: ViewCfg; spec: string }
+  const desired = new Map<string, Desired>();
 
   for (const row of baseRows) {
-    const planned: PlannedBase = { path: row.content_ref, folderId: row.folder_id, folderName: row.folder_name === '/' ? 'Vault' : row.folder_name, views: [], skipped: [] };
-    plan.bases.push(planned);
     let doc: BaseFile;
     try {
       doc = (parseYaml(new TextDecoder().decode(await fs.read(row.content_ref))) ?? {}) as BaseFile;
     } catch (e) {
-      planned.skipped.push(`unparseable YAML (${e instanceof Error ? e.message : 'error'})`);
+      result.notes.push(`${row.content_ref}: unparseable YAML (${e instanceof Error ? e.message : 'error'})`);
       continue;
     }
-    if (doc.formulas) planned.skipped.push('formulas are not imported');
+    const fileNotes: string[] = [];
+    if (doc.formulas) fileNotes.push('formulas are not imported');
 
-    const baseFilter = parseFilterBlock(doc.filters, kinds, planned.skipped);
+    const baseFilter = parseFilterBlock(doc.filters, mergedKinds, fileNotes);
+    let folderId = row.folder_id;
+    let folderName = row.folder_name === '/' ? 'Vault' : row.folder_name;
     const folderOverride = extractInFolder(doc.filters);
     if (folderOverride) {
       const target = await db.exec<{ id: string; name: string }>(`SELECT id, name FROM folders WHERE name = ? LIMIT 1`, [folderOverride]);
       if (target[0]) {
-        planned.folderId = target[0].id;
-        planned.folderName = target[0].name;
-      } else planned.skipped.push(`file.inFolder("${folderOverride}"): no such folder — using the .base file's own folder`);
+        folderId = target[0].id;
+        folderName = target[0].name;
+      } else fileNotes.push(`file.inFolder("${folderOverride}"): no such folder — using the .base file's own folder`);
     }
 
-    const existingViews = await listViews(planned.folderId);
     for (const v of doc.views ?? []) {
-      const view = planViewImport(v, baseFilter, kinds);
-      view.exists = existingViews.some((e) => e.name === view.name);
-      planned.views.push(view);
+      const planned = planViewImport(v, baseFilter, mergedKinds);
+      const spec = specOf(planned.layout, planned.cfg);
+      const viewName = planned.name;
+      desired.set(`${row.content_ref}#${viewName}`, { folderId, folderName, base: row.content_ref, view: viewName, name: viewName, layout: planned.layout, cfg: planned.cfg, spec });
+      for (const n of planned.notes) fileNotes.push(`${viewName}: ${n}`);
     }
-    if (!doc.views?.length) planned.skipped.push('no views declared');
+    for (const n of fileNotes) result.notes.push(`${row.content_ref}: ${n}`);
   }
 
-  return plan;
+  // ── Reconcile derived views per folder ──
+  const folderIds = new Set<string | null>([...desired.values()].map((d) => d.folderId));
+  // Also folders that HOLD derived views whose base vanished: sweep every folder with views.
+  const allViewFolders = await db.exec<{ folder_id: string | null }>(`SELECT DISTINCT folder_id FROM views`);
+  for (const f of allViewFolders) folderIds.add(f.folder_id);
+
+  // One exclusive transaction: concurrent syncs (StrictMode double-mount, a
+  // future watcher) serialize here, so the second pass SEES the first's writes
+  // and skips instead of duplicating.
+  await db.transaction(async () => {
+  for (const folderId of folderIds) {
+    const views = await listViews(folderId);
+    const here = [...desired.values()].filter((d) => d.folderId === folderId);
+
+    for (const d of here) {
+      const matches = views.filter((v) => v.cfg.origin?.base === d.base && v.cfg.origin.view === d.view);
+      // Self-heal duplicates (e.g. from a pre-transaction race): keep the first,
+      // remove untouched extras.
+      for (const extra of matches.slice(1)) {
+        if (specOf(extra.layout, extra.cfg) === extra.cfg.origin!.spec) {
+          await deleteView(extra.id);
+          result.viewsRemoved.push({ folder: d.base, name: `${extra.name} (duplicate)` });
+        }
+      }
+      const match = matches[0];
+      if (!match) {
+        if (views.some((v) => !v.cfg.origin && v.name === d.name)) {
+          result.notes.push(`${d.base}: view "${d.name}" skipped — a Waffle view with that name already exists in ${d.folderName}`);
+          continue;
+        }
+        const created = await createView(folderId, d.name);
+        await saveViewState(created.id, d.layout, { ...d.cfg, origin: { base: d.base, view: d.view, spec: d.spec } });
+        result.viewsCreated.push({ folder: d.folderName, name: d.name });
+        continue;
+      }
+      const untouched = specOf(match.layout, match.cfg) === match.cfg.origin!.spec;
+      if (!untouched) {
+        if (match.cfg.origin!.spec !== d.spec) result.viewsDiverged.push({ folder: d.folderName, name: match.name });
+        continue;
+      }
+      if (match.cfg.origin!.spec !== d.spec) {
+        await saveViewState(match.id, d.layout, { ...d.cfg, origin: { base: d.base, view: d.view, spec: d.spec } });
+        result.viewsUpdated.push({ folder: d.folderName, name: match.name });
+      }
+    }
+
+    // Orphans: derived here, base/view gone, still untouched → remove.
+    for (const v of views) {
+      if (!v.cfg.origin) continue;
+      if (desired.has(`${v.cfg.origin.base}#${v.cfg.origin.view}`)) continue;
+      if (specOf(v.layout, v.cfg) === v.cfg.origin.spec) {
+        await deleteView(v.id);
+        result.viewsRemoved.push({ folder: v.cfg.origin.base, name: v.name });
+      }
+    }
+  }
+  });
+
+  return result;
 }
 
-export async function applyImport(fs: VaultFs, plan: ImportPlan): Promise<{ types: number; views: number }> {
-  let types = 0;
-  if (Object.keys(plan.typesNew).length > 0) {
-    const existing = await loadPropertyTypes(fs);
-    await savePropertyTypes(fs, { ...plan.typesNew, ...existing }); // existing wins on any collision
-    types = Object.keys(plan.typesNew).length;
-  }
-  let views = 0;
-  for (const base of plan.bases) {
-    for (const v of base.views) {
-      if (v.exists) continue;
-      const created = await createView(base.folderId, v.name);
-      await saveViewState(created.id, v.layout, v.cfg);
-      views++;
-    }
-  }
-  return { types, views };
+/** Canonical spec of a view's imported state — origin excluded, key order fixed by construction. */
+function specOf(layout: string, cfg: ViewCfg): string {
+  return JSON.stringify({ layout, sort: cfg.sort, filters: cfg.filters, groupBy: cfg.groupBy, columns: cfg.columns ?? null });
 }
 
 // ── Bases parsing (the documented subset) ────────────────────────────────────
@@ -149,7 +194,7 @@ interface BaseFile {
   views?: BaseView[];
 }
 
-function planViewImport(v: BaseView, baseFilter: FilterNode | null, kinds: PropertyTypes): PlannedView {
+function planViewImport(v: BaseView, baseFilter: FilterNode | null, kinds: PropertyTypes): { name: string; layout: string; cfg: ViewCfg; notes: string[] } {
   const notes: string[] = [];
   const layout = v.type === 'table' ? 'table' : v.type === 'cards' ? 'grid' : 'masonry';
   if (v.type && v.type !== 'table' && v.type !== 'cards') notes.push(`view type "${v.type}" → masonry`);
@@ -180,7 +225,7 @@ function planViewImport(v: BaseView, baseFilter: FilterNode | null, kinds: Prope
 
   const cfg: ViewCfg = { sort, filters, groupBy: null };
   if (columns.length) cfg.columns = columns;
-  return { name: v.name?.trim() || 'Imported view', layout, cfg, notes, exists: false };
+  return { name: v.name?.trim() || 'Imported view', layout, cfg, notes };
 }
 
 /** Obsidian `and:`/`or:` blocks of expression strings → FilterNode (skips reported). */
