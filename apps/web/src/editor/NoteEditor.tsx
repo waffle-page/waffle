@@ -1,9 +1,12 @@
 /**
  * Note editor, step-6: CodeMirror 6 source mode + reading view (Preview), with
  * debounced save straight to the vault file — the file stays canonical
- * (ADR-004); the next scan re-indexes changes (hash diff). Voice memos record
- * via MediaRecorder into the note's folder and embed as ![[file.webm]].
+ * (ADR-004) and every save runs a targeted rescan so the index (properties,
+ * FTS) never trails what's on disk. Voice memos record via MediaRecorder into
+ * the note's folder and embed as ![[file.webm]].
  *
+ * The Back button AWAITS the pending save + rescan before onClose — the host
+ * requeries its rows on close, and that read must see this editor's writes.
  * No self-write suppression yet: the library screen doesn't run a watcher —
  * when it does, saves from here must mark their paths so the watcher's rescan
  * doesn't fight the open editor.
@@ -11,7 +14,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { EditorView, basicSetup } from 'codemirror';
 import { markdown } from '@codemirror/lang-markdown';
-import { getVaultFs } from '../platform/instance';
+import { rescanFile } from '@waffle/core';
+import { getVaultFs, platform } from '../platform/instance';
 import { vaultUrl, mimeFor } from './assetUrl';
 import { livePreview } from './livePreview';
 import { liveStyle } from './liveStyle';
@@ -36,6 +40,7 @@ export function NoteEditor({
   const hostRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
   const textRef = useRef('');
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [mode, setMode] = useState<Mode>('edit');
   const [savedAt, setSavedAt] = useState<string | null>(null);
@@ -46,8 +51,21 @@ export function NoteEditor({
   const save = async (content: string): Promise<void> => {
     const fs = await getVaultFs();
     await fs.write(path, new TextEncoder().encode(content));
+    await rescanFile(platform.db, fs, path); // index mirrors the file NOW, not at the next full scan
     setDirty(false);
     setSavedAt(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
+  };
+
+  /** Flush any pending debounced save, then leave — the host refreshes on close. */
+  const onBack = async (): Promise<void> => {
+    if (saveTimerRef.current) {
+      clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = null;
+    }
+    const view = viewRef.current;
+    const text = view ? view.state.doc.toString() : textRef.current;
+    if (dirty) await save(text);
+    onClose();
   };
 
   useEffect(() => {
@@ -68,7 +86,6 @@ export function NoteEditor({
 
   useEffect(() => {
     if (!loaded || mode !== 'edit' || !hostRef.current) return;
-    let saveTimer: ReturnType<typeof setTimeout> | null = null;
     const view = new EditorView({
       doc: textRef.current,
       parent: hostRef.current,
@@ -88,8 +105,8 @@ export function NoteEditor({
           if (!update.docChanged) return;
           textRef.current = update.state.doc.toString();
           setDirty(true);
-          if (saveTimer) clearTimeout(saveTimer);
-          saveTimer = setTimeout(() => void save(textRef.current), SAVE_DEBOUNCE_MS);
+          if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+          saveTimerRef.current = setTimeout(() => void save(textRef.current), SAVE_DEBOUNCE_MS);
         }),
         EditorView.theme({
           '&': { height: '100%', fontSize: '0.9rem' },
@@ -100,8 +117,10 @@ export function NoteEditor({
     });
     viewRef.current = view;
     return () => {
-      if (saveTimer) {
-        clearTimeout(saveTimer);
+      // Non-Back unmounts (wikilink navigation, mode switch): flush fire-and-forget.
+      if (saveTimerRef.current) {
+        clearTimeout(saveTimerRef.current);
+        saveTimerRef.current = null;
         void save(view.state.doc.toString());
       }
       viewRef.current = null;
@@ -165,7 +184,7 @@ export function NoteEditor({
   return (
     <div style={{ position: 'absolute', inset: 0, background: 'var(--bg)', display: 'flex', flexDirection: 'column', zIndex: 10 }}>
       <header style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '0.6rem 1rem', borderBottom: '1px solid var(--border)', background: 'var(--surface)' }}>
-        <button onClick={onClose} style={headerBtn}>← Back</button>
+        <button onClick={() => void onBack()} style={headerBtn}>← Back</button>
         <h2 style={{ margin: 0, fontSize: '1rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{title}</h2>
         <span style={{ marginLeft: 'auto', fontSize: '0.72rem', color: 'var(--text-dim)', whiteSpace: 'nowrap' }}>
           {notice ?? (dirty ? 'editing…' : savedAt ? `saved ${savedAt}` : path)}

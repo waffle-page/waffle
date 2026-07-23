@@ -410,7 +410,12 @@ export function Library() {
               key={openNote.path}
               path={openNote.path}
               title={openNote.title}
-              onClose={() => setOpenNote(null)}
+              onClose={() => {
+                setOpenNote(null);
+                // The editor flushed save + rescan before calling this — requery
+                // so edited frontmatter lands in cells/filters/groups immediately.
+                void refreshQuiet();
+              }}
               onNavigate={(name) => void onNavigateWikilink(name)}
             />
           )}
