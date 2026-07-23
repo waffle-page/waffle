@@ -52,7 +52,7 @@ Site adapters match by host rules (password-manager style, subdomain wildcards) 
 ## ADR-016 — Notes are rows: no user-created database tables
 An "Airtable table" is a table VIEW over notes (frontmatter = columns). One mental model, files-canonical, Obsidian-portable. Real user-tables are deferred until a case passes the breakage tests (10k+ rows, seconds-frequency writes, pure relational webs, fast concurrent cell edits — docs/12); CSV→dataset via the pantry covers big-tabular analysis meanwhile.
 
-*Amended 2026-07-23:* kinds a YAML scalar can't express (select, money, duration, coords) are carried by vault-level key→kind declarations at `.waffle/properties.json` — Obsidian's `types.json` pattern, files-canonical, read by the scanner at scan time and written by the table's add-column flow. Undeclared keys fall back to value inference.
+*Amended 2026-07-23:* kinds a YAML scalar can't express (select, money, duration, coords) are carried by vault-level key→kind declarations at `.waffle/properties.json` — Obsidian's `types.json` pattern, files-canonical, read by the scanner at scan time and written by the table's add-column flow. Undeclared keys fall back to value inference. YAML scalar sequences infer as the `list` kind (Obsidian `multitext`) and remain sequences on write; nested structures Waffle cannot author use a read-only safety carrier, never editable scalar text.
 
 ## ADR-017 — Lists reference; folders contain
 Folders are single-parent containment (where things live, files). Lists are many-to-many curated sequences referencing local toppings OR catalog entities, ordered or not, publishable as catalog objects, with derived progress from member interactions. A List is itself a topping backed by a `.list` file. (docs/11)

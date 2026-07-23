@@ -2,7 +2,8 @@
  * Personal marks (docs/09): status + rating, keyed to the ENTITY (canonical-URL
  * hash for links) — one status per set per entity, private always.
  */
-import { contentHash } from '@waffle/core';
+import { contentHash, fromEavColumns } from '@waffle/core';
+import { formatProperty } from '@waffle/ui';
 import { platform } from '../platform/instance';
 
 export interface StatusSet {
@@ -66,11 +67,8 @@ export async function loadToppingProps(toppingId: string): Promise<Array<{ key: 
     `SELECT key, kind, value_text, value_num, value_aux FROM properties WHERE topping_id = ? ORDER BY key`,
     [toppingId],
   );
-  return rows.map((r) => ({
-    key: r.key,
-    value:
-      r.kind === 'money' ? `${r.value_num} ${r.value_aux}` :
-      r.kind === 'checkbox' ? (r.value_num ? 'yes' : 'no') :
-      r.value_text ?? String(r.value_num ?? ''),
-  }));
+  return rows.flatMap((r) => {
+    const value = fromEavColumns(r.kind, r.value_text, r.value_num, r.value_aux);
+    return value ? [{ key: r.key, value: formatProperty(value) }] : [];
+  });
 }

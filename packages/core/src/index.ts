@@ -3,5 +3,5 @@ export { MIGRATIONS } from './db/migrations';
 export { migrate } from './db/migrate';
 export { scanVault, rescanFile, type ScanResult } from './vault/scanner';
 export { parseNote, toEavColumns, fromEavColumns, propertyToYaml, updateFrontmatter, type ParsedNote } from './vault/frontmatter';
-export { loadPropertyTypes, savePropertyTypes, type PropertyTypes, type PropertyTypeDecl } from './vault/propertyTypes';
+export { loadPropertyTypes, savePropertyTypes, type PropertyTypes, type PropertyTypeDecl, type PropertyTypeKind } from './vault/propertyTypes';
 export { contentHash, folderIdFor } from './vault/hash';

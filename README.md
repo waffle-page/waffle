@@ -14,7 +14,7 @@ A **local-first everything-library**. Folders hold **toppings** — notes, links
 
 **P1 — structure + identity — shipped so far:**
 
-- Typed properties: 9 kinds, vault-level declarations at `.waffle/properties.json` (Obsidian's `types.json` pattern), frontmatter-first writes with targeted rescans.
+- Typed properties: 10 user-facing kinds including Obsidian List/`multitext`, vault-level declarations at `.waffle/properties.json` (Obsidian's `types.json` pattern), frontmatter-first writes with targeted rescans; nested YAML Waffle cannot author remains visible and read-only.
 - The **table layout**: create-row-in-table, validated per-kind cell editors, bulk property edit, spreadsheet paste (Excel/Sheets/Airtable TSV → typed notes with auto-declared columns), cell/range selection, keyboard navigation, canonical TSV copy, paste-at-anchor with overflow notes, serialized same-note writes, persisted column resize/reorder, sticky Title, fill-down, and accessible active-cell/range semantics.
 - **Saved-view manager**: named views per folder with defaults, filters compiled to SQL, property sorts, group-by in table/grid/list.
 - Per-entity **status + ratings** (multi-axis slots) with the link detail view.
@@ -22,10 +22,10 @@ A **local-first everything-library**. Folders hold **toppings** — notes, links
 - **Soft delete** to `.trash/` (ADR-021) from table selection and the editor.
 - **Bidirectional Obsidian config sync** (ADR-020): `types.json` and `.base` files sync at every scan; editing a derived view in Waffle writes back into the `.base` via comment-preserving YAML surgery; inexpressible states freeze safely, and the sync report names every compromise.
 
-**Next** (working agreements in [CLAUDE.md](CLAUDE.md)): Obsidian list-property
-safety/`multitext` support, then current Bases parity (`groupBy`, list views,
-NOT, common `file.*` fields), then table interaction slice C — in-memory
-session undo/redo for property writes and soft deletes — and the P1 remainder.
+**Next** (working agreements in [CLAUDE.md](CLAUDE.md)): current Obsidian Bases
+parity (`groupBy`, list views, NOT, common `file.*` fields), then table
+interaction slice C — in-memory session undo/redo for property writes and soft
+deletes — and the P1 remainder.
 Phase ladder: `docs/04-phases.md`.
 
 ## Try it

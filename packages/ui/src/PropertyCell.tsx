@@ -7,8 +7,13 @@
 import { useId, useRef, useState, type CSSProperties } from 'react';
 import type { PropertyValue } from '@waffle/core';
 
-/** Kinds the UI can author. duration/coords display fine but have no editor yet (recipe: docs/recipes/add-a-property-type.md). */
-export const EDITABLE_KINDS: ReadonlyArray<PropertyValue['kind']> = ['text', 'number', 'date', 'checkbox', 'select', 'url', 'money'];
+/**
+ * Kinds the UI can author. duration/coords display fine but have no editor yet;
+ * `unsupported` is a read-only safety carrier by invariant.
+ */
+export type EditablePropertyKind = Exclude<PropertyValue['kind'], 'duration' | 'coords' | 'unsupported'>;
+export const EDITABLE_KINDS: ReadonlyArray<PropertyValue['kind']> =
+  ['text', 'number', 'date', 'checkbox', 'select', 'url', 'money', 'list'] satisfies ReadonlyArray<EditablePropertyKind>;
 
 export function formatProperty(p: PropertyValue): string {
   switch (p.kind) {
@@ -34,6 +39,8 @@ export function formatProperty(p: PropertyValue): string {
       return p.iso.includes('T') ? d.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }) : d.toLocaleDateString(undefined, { dateStyle: 'medium' });
     }
     case 'coords': return `${p.lat.toFixed(4)}, ${p.lng.toFixed(4)}`;
+    case 'list': return p.values.length === 0 ? '[]' : p.values.map((value) => value === null ? 'null' : String(value)).join(' · ');
+    case 'unsupported': return JSON.stringify(p.value) ?? '';
   }
 }
 
@@ -76,9 +83,26 @@ export function parseCellInput(kind: PropertyValue['kind'], raw: string, currenc
       return validIsoDate(s)
         ? { ok: true, value: { kind, iso: s } }
         : { ok: false, message: 'Enter a valid ISO date.' };
+    case 'list': {
+      let value: unknown;
+      try {
+        value = JSON.parse(s);
+      } catch {
+        return { ok: false, message: 'Enter a JSON array, for example ["veggie","vegan"].' };
+      }
+      return isPropertyList(value)
+        ? { ok: true, value: { kind, values: value } }
+        : { ok: false, message: 'List items must be text, numbers, booleans, or null.' };
+    }
     default:
       return { ok: false, message: `${kind} values cannot be edited here.` };
   }
+}
+
+function isPropertyList(value: unknown): value is Array<string | number | boolean | null> {
+  return Array.isArray(value) && value.every((item) =>
+    item === null || typeof item === 'string' || typeof item === 'boolean' || (typeof item === 'number' && Number.isFinite(item)),
+  );
 }
 
 function editorInitial(p: PropertyValue | undefined): string {
@@ -87,6 +111,7 @@ function editorInitial(p: PropertyValue | undefined): string {
     case 'number': return String(p.value);
     case 'money': return String(p.amount);
     case 'date': return p.iso.slice(0, 10); // <input type=date> speaks date-only
+    case 'list': return JSON.stringify(p.values);
     default: return formatProperty(p);
   }
 }
@@ -211,6 +236,7 @@ function CellEditor({ label, kind, currency, options, initial, onCommit, onCance
         step={kind === 'money' ? '0.01' : kind === 'number' ? 'any' : undefined}
         list={listId}
         value={raw}
+        placeholder={kind === 'list' ? '["value","value"]' : undefined}
         aria-label={`Edit ${label}`}
         aria-invalid={validationError ? true : undefined}
         aria-describedby={errorId}

@@ -8,8 +8,11 @@
  */
 import type { PropertyValue, VaultFs } from '../types';
 
+/** Declaration-backed kinds. `unsupported` exists only as an inference carrier. */
+export type PropertyTypeKind = Exclude<PropertyValue['kind'], 'unsupported'>;
+
 export interface PropertyTypeDecl {
-  kind: PropertyValue['kind'];
+  kind: PropertyTypeKind;
   /** money only: ISO 4217; frontmatter stores the bare amount. */
   currency?: string;
 }
@@ -18,7 +21,7 @@ export type PropertyTypes = Record<string, PropertyTypeDecl>;
 
 const FILE = '.waffle/properties.json';
 
-const KINDS = new Set(['text', 'number', 'money', 'duration', 'date', 'coords', 'select', 'url', 'checkbox']);
+const KINDS = new Set<PropertyTypeKind>(['text', 'number', 'money', 'duration', 'date', 'coords', 'select', 'url', 'checkbox', 'list']);
 
 export async function loadPropertyTypes(fs: VaultFs): Promise<PropertyTypes> {
   try {

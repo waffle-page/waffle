@@ -26,6 +26,15 @@ export interface Topping {
   updatedAt: string;
 }
 
+/** JSON-compatible YAML value retained for display without scalar coercion. */
+export type PropertyJsonValue =
+  | string
+  | number
+  | boolean
+  | null
+  | PropertyJsonValue[]
+  | { [key: string]: PropertyJsonValue };
+
 export type PropertyValue =
   | { kind: 'text'; value: string }
   | { kind: 'number'; value: number }
@@ -35,7 +44,15 @@ export type PropertyValue =
   | { kind: 'coords'; lat: number; lng: number }             // WGS84
   | { kind: 'select'; option: string }
   | { kind: 'url'; value: string }
-  | { kind: 'checkbox'; value: boolean };
+  | { kind: 'checkbox'; value: boolean }
+  /** Obsidian List / `multitext`: YAML sequence, edited as an unambiguous JSON array. */
+  | { kind: 'list'; values: Array<string | number | boolean | null> }
+  /**
+   * Read-only safety carrier for JSON-compatible YAML maps/nested sequences.
+   * Never declaration-backed or authorable: it prevents a structure Waffle
+   * cannot model from masquerading as editable scalar text.
+   */
+  | { kind: 'unsupported'; value: PropertyJsonValue };
 
 export interface Folder {
   id: string;

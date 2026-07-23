@@ -105,21 +105,25 @@ clobbering unknown sizes, Title remains fixed during horizontal scroll, and
 Cmd/Ctrl+D fills rectangular selections through the file-first row-batched
 write loop.
 
+**Obsidian list-property compatibility complete:** YAML scalar sequences are
+the `list` kind and never pass through editable scalar text; Obsidian
+`multitext` declarations import directly. Editing and canonical TSV use a JSON
+array grammar, preserving item delimiters and scalar types. JSON-compatible
+nested YAML structures remain visible through a read-only `unsupported`
+carrier, so editing another property cannot collapse their shape.
+
 **Next, in agreed order:**
 
-1. **Obsidian list-property compatibility** — make YAML sequence values safe
-   before making them editable: no array may be coerced to a scalar, then add
-   the Waffle representation for Obsidian `multitext` properties.
-2. **Bases compatibility parity** — import current `groupBy` and list views,
+1. **Bases compatibility parity** — import current `groupBy` and list views,
    NOT/negated filters, and the common `file.*` fields Waffle can represent;
    unsupported constructs continue to report/freeze rather than degrade.
-3. **Table interaction slice C** — session undo/redo (inverse patches over
+2. **Table interaction slice C** — session undo/redo (inverse patches over
    property writes; deletes un-trash by stored path).
-4. **P1 remainder**: status/ratings surfacing in library views (chips +
+3. **P1 remainder**: status/ratings surfacing in library views (chips +
    interaction filters), theme palette editor, Supabase auth, Capacitor shell
    (share extension), Tauri shell (native FS watching — replaces the
    per-write-site rescans with a real watcher), on-device Whisper.
-5. **P2 sharing opens with two distinct surfaces**: collaborative invite links
+4. **P2 sharing opens with two distinct surfaces**: collaborative invite links
    and unlisted public publishing for a single topping or folder. Public links
    are revocable, read-only projections with stable, crawler-fetchable
    Open Graph/Twitter Card images for WhatsApp and equivalent unfurlers. The

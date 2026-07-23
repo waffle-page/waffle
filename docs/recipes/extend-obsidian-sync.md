@@ -52,8 +52,11 @@ branch in `syncObsidian` and the canonicalization tail of `writeBackView`
 ## Adding an Obsidian property type mapping
 
 `OBSIDIAN_KIND` in `obsidianImport.ts`. Only map types with a real Waffle
-kind (see docs/recipes/add-a-property-type.md for creating one — `multitext`
-waits on a list kind).
+kind (see docs/recipes/add-a-property-type.md for creating one). Obsidian
+`multitext` maps to Waffle `list`: its YAML sequence remains a sequence,
+while Waffle's table editor and clipboard use a JSON array so item content is
+unambiguous. Nested YAML structures infer as read-only `unsupported`; do not
+map any Obsidian type to that safety carrier.
 
 ## Concurrency
 

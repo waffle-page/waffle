@@ -11,6 +11,11 @@ const FILES: Record<string, string> = {
   'Recipes/pasta-alla-norma.md': `---
 rating: 4.5
 time_min: 45
+dietary: [vegetarian, gluten]
+nutrition:
+  serving:
+    amount: 2
+    unit: portions
 tags: [recipes, italy]
 ---
 # Pasta alla Norma
@@ -24,6 +29,9 @@ Kitchen voice memo:
 
   'Recipes/desserts/tiramisu.md': `---
 rating: 5
+dietary:
+  - vegetarian
+  - coffee
 tags: [recipes, dessert]
 ---
 # Tiramisù
@@ -66,8 +74,8 @@ White linen shirt for the #wedding. Pairs with the tan loafers.
   'Finances/net-worth.dash': `{ "widgets": [] }\n`,
 
   // Obsidian-side config the importer consumes: vault-wide property types
-  // (types.json) and a Bases file with two views. `dietary` (multitext) and
-  // the negated/`file.ext` filters exercise the honest-skip paths.
+  // (types.json) and a Bases file with two views. `dietary` exercises the
+  // multitext/list mapping; negated/`file.ext` filters exercise honest skips.
   '.obsidian/types.json': `{
   "types": {
     "rating": "number",

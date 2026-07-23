@@ -23,6 +23,7 @@ const OBSIDIAN_KIND: Record<string, PropertyTypeDecl['kind'] | undefined> = {
   checkbox: 'checkbox',
   date: 'date',
   datetime: 'date',
+  multitext: 'list',
 };
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;

@@ -10,7 +10,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { loadPropertyTypes, propertyToYaml, rescanFile, savePropertyTypes, updateFrontmatter, type PropertyTypes, type PropertyValue } from '@waffle/core';
 import {
   EDITABLE_KINDS, PropertyTable, TABLE_COLUMN_DEFAULT_WIDTH, TableIcon, TITLE_SORT_KEY, parseCellInput, registerLayout,
-  type CellInputParseResult, type LayoutProps, type TableColumn, type TableColumnConfig, type TableGridCell, type TableRowData,
+  type CellInputParseResult, type EditablePropertyKind, type LayoutProps, type TableColumn, type TableColumnConfig, type TableGridCell, type TableRowData,
 } from '@waffle/ui';
 import { getVaultFs, platform } from '../platform/instance';
 import { createNote } from './addFlows';
@@ -25,9 +25,10 @@ const PASTE_BOOL = new Set([...PASTE_TRUE, 'false', 'no', '0']);
 const PASTE_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
 /** Column kind from a pasted column's values: unanimity or bust (text). */
-function inferPasteKind(values: string[]): PropertyValue['kind'] {
+function inferPasteKind(values: string[]): EditablePropertyKind {
   const vs = values.map((v) => v.trim()).filter((v) => v !== '');
   if (vs.length === 0) return 'text';
+  if (vs.every((v) => parseCellInput('list', v, 'EUR').ok)) return 'list';
   if (vs.every((v) => !Number.isNaN(Number(v)))) return 'number';
   if (vs.every((v) => PASTE_DATE.test(v))) return 'date';
   if (vs.every((v) => PASTE_BOOL.has(v.toLowerCase()))) return 'checkbox';
@@ -47,6 +48,10 @@ function pasteCellValue(kind: PropertyValue['kind'], raw: string, currency: stri
 
 function samePropertyValue(left: PropertyValue | null | undefined, right: PropertyValue | null): boolean {
   return JSON.stringify(left ?? null) === JSON.stringify(right);
+}
+
+function canAuthorProperty(row: TableRowData, key: string): boolean {
+  return row.editable && row.props[key]?.kind !== 'unsupported';
 }
 
 function TableLayout({ items, groups, folderId = null, onOpen, onMutated, tableConfig, onTableConfig }: LayoutProps) {
@@ -192,7 +197,7 @@ function TableLayout({ items, groups, folderId = null, onOpen, onMutated, tableC
 
   const onEditCell = (id: string, key: string, value: PropertyValue | null): void => {
     const row = rowById.get(id);
-    if (!row?.editable || !row.item.contentRef) return;
+    if (!row || !canAuthorProperty(row, key) || !row.item.contentRef) return;
     // Optimistic: the file write + rescan lag a beat; the cell must not snap back.
     patchOptimistically(new Map([[id, { [key]: value }]]));
     const path = row.item.contentRef;
@@ -214,11 +219,13 @@ function TableLayout({ items, groups, folderId = null, onOpen, onMutated, tableC
   const applyBulk = (value: PropertyValue | null): void => {
     if (!bulkKey) return;
     const key = bulkKey;
-    const targets = rows.filter((r) => selected.has(r.item.id) && r.editable && r.item.contentRef);
+    const selectedNotes = rows.filter((r) => selected.has(r.item.id) && r.editable && r.item.contentRef);
+    const targets = value === null ? selectedNotes : selectedNotes.filter((r) => canAuthorProperty(r, key));
+    const skipped = selectedNotes.length - targets.length;
     void run(async () => {
       const fs = await getVaultFs();
       for (const t of targets) await writeNoteProperty(fs, t.item.contentRef!, key, value);
-    });
+    }, skipped > 0 ? `${key}: skipped ${skipped} read-only structured value${skipped === 1 ? '' : 's'}.` : null);
   };
 
   const applyBulkRaw = (): void => {
@@ -266,7 +273,7 @@ function TableLayout({ items, groups, folderId = null, onOpen, onMutated, tableC
     const sourceValues = new Map<string, PropertyValue | null>();
     for (const cell of cellRows[0] ?? []) {
       const column = columns.find((candidate) => candidate.key === cell.columnKey);
-      if (!column || !EDITABLE_KINDS.includes(column.kind)) continue;
+      if (!column || !canAuthorProperty(sourceRow, cell.columnKey) || !EDITABLE_KINDS.includes(column.kind)) continue;
       sourceValues.set(cell.columnKey, sourceRow.props[cell.columnKey] ?? null);
     }
     if (sourceValues.size === 0) return;
@@ -277,7 +284,7 @@ function TableLayout({ items, groups, folderId = null, onOpen, onMutated, tableC
       if (!target?.editable || !target.item.contentRef) continue;
       const patch: Record<string, PropertyValue | null> = {};
       for (const cell of cells) {
-        if (!sourceValues.has(cell.columnKey)) continue;
+        if (!sourceValues.has(cell.columnKey) || !canAuthorProperty(target, cell.columnKey)) continue;
         const value = sourceValues.get(cell.columnKey) ?? null;
         if (!samePropertyValue(target.props[cell.columnKey], value)) patch[cell.columnKey] = value;
       }
@@ -322,6 +329,10 @@ function TableLayout({ items, groups, folderId = null, onOpen, onMutated, tableC
         }
         const column = columns.find((candidate) => candidate.key === key);
         if (!column || !EDITABLE_KINDS.includes(column.kind)) return;
+        if (target && !canAuthorProperty(target, key)) {
+          invalid.push(`${key}: nested YAML values are read-only`);
+          return;
+        }
         const parsed = pasteCellValue(column.kind, raw, column.currency ?? 'EUR');
         if (!parsed.ok) {
           invalid.push(`${key}: ${parsed.message}`);
@@ -426,7 +437,7 @@ function TableLayout({ items, groups, folderId = null, onOpen, onMutated, tableC
     });
   };
 
-  const addColumn = (name: string, kind: PropertyValue['kind'], currency: string): void => {
+  const addColumn = (name: string, kind: EditablePropertyKind, currency: string): void => {
     const key = name.trim();
     if (!key || key.startsWith('$') || columns.some((c) => c.key === key)) return;
     void run(async () => {
@@ -486,7 +497,7 @@ function TableLayout({ items, groups, folderId = null, onOpen, onMutated, tableC
                   onChange={(e) => setBulkRaw(e.target.value)}
                   type={bulkColumn.kind === 'number' || bulkColumn.kind === 'money' ? 'number' : bulkColumn.kind === 'date' ? 'date' : 'text'}
                   list={bulkColumn.kind === 'select' ? 'bulk-options' : undefined}
-                  placeholder="value"
+                  placeholder={bulkColumn.kind === 'list' ? '["value","value"]' : 'value'}
                   style={{ ...selectStyle, width: 150 }}
                 />
               ) : null}
@@ -572,9 +583,9 @@ function TableLayout({ items, groups, folderId = null, onOpen, onMutated, tableC
   );
 }
 
-function AddColumnForm({ existing, onSubmit, onClose }: { existing: string[]; onSubmit: (name: string, kind: PropertyValue['kind'], currency: string) => void; onClose: () => void }) {
+function AddColumnForm({ existing, onSubmit, onClose }: { existing: string[]; onSubmit: (name: string, kind: EditablePropertyKind, currency: string) => void; onClose: () => void }) {
   const [name, setName] = useState('');
-  const [kind, setKind] = useState<PropertyValue['kind']>('text');
+  const [kind, setKind] = useState<EditablePropertyKind>('text');
   const [currency, setCurrency] = useState('EUR');
   const clean = name.trim();
   const taken = existing.includes(clean);
@@ -583,9 +594,9 @@ function AddColumnForm({ existing, onSubmit, onClose }: { existing: string[]; on
     <div style={{ position: 'absolute', top: 8, right: 12, zIndex: 5, display: 'flex', flexDirection: 'column', gap: 8, padding: '0.75rem', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', boxShadow: '0 8px 24px rgba(0,0,0,0.18)', width: 230 }}>
       <strong style={{ fontSize: '0.82rem' }}>New property column</strong>
       <input autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="name (frontmatter key)" style={selectStyle} />
-      <select value={kind} onChange={(e) => setKind(e.target.value as PropertyValue['kind'])} style={selectStyle}>
+      <select value={kind} onChange={(e) => setKind(e.target.value as EditablePropertyKind)} style={selectStyle}>
         {EDITABLE_KINDS.map((k) => (
-          <option key={k} value={k}>{k}</option>
+          <option key={k} value={k}>{k === 'list' ? 'list (Obsidian multitext)' : k}</option>
         ))}
       </select>
       {kind === 'money' && <input value={currency} onChange={(e) => setCurrency(e.target.value)} placeholder="currency (ISO 4217)" maxLength={3} style={selectStyle} />}

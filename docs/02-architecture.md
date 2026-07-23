@@ -58,7 +58,7 @@ The vault is a normal folder:
     └── thumbs/                  # 480w webp + dominant color (ADR-012 as amended; 2nd size + blurhash arrive with remote images, P2)
 ```
 
-Drag in/out via Finder; the watcher follows; files moved while the app was closed re-associate by content hash. An Obsidian vault dropped in works immediately (`.md`, frontmatter → properties, tags, wikilinks, mermaid); `.base` files convert to saved views via the P1 importer; Obsidian and Waffle can point at the same folder simultaneously during transition.
+Drag in/out via Finder; the watcher follows; files moved while the app was closed re-associate by content hash. An Obsidian vault dropped in works immediately (`.md`, frontmatter → scalar and list properties, tags, wikilinks, mermaid); JSON-compatible nested YAML structures remain visible but read-only rather than being coerced to text. `.base` files convert to saved views via the P1 importer; Obsidian and Waffle can point at the same folder simultaneously during transition.
 
 ## Sharing model (Drive semantics)
 

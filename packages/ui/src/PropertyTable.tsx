@@ -117,6 +117,8 @@ function propertyToTsv(value: PropertyValue): string {
     case 'checkbox': return value.value ? 'true' : 'false';
     case 'money': return String(value.amount);
     case 'date': return value.iso;
+    case 'list': return JSON.stringify(value.values);
+    case 'unsupported': return JSON.stringify(value.value) ?? '';
     default: return formatProperty(value);
   }
 }
@@ -492,7 +494,7 @@ export function PropertyTable({
   const cellCanEdit = (cell: TableGridCell): boolean => {
     const row = rowById.get(cell.rowId);
     const column = columnByKey.get(cell.columnKey);
-    return !!row?.editable && !!column && EDITABLE_KINDS.includes(column.kind);
+    return !!row?.editable && row.props[cell.columnKey]?.kind !== 'unsupported' && !!column && EDITABLE_KINDS.includes(column.kind);
   };
 
   const toggleCheckbox = (cell: TableGridCell): boolean => {
@@ -767,7 +769,7 @@ export function PropertyTable({
                       role="gridcell"
                       aria-colindex={propertyIndex + 2}
                       aria-label={`${row.item.title}, ${column.key}: ${row.props[column.key] ? propertyToTsv(row.props[column.key]!) : 'blank'}${editing ? ', editing' : ''}`}
-                      aria-readonly={!row.editable || !EDITABLE_KINDS.includes(column.kind)}
+                      aria-readonly={!row.editable || row.props[column.key]?.kind === 'unsupported' || !EDITABLE_KINDS.includes(column.kind)}
                       data-column-key={column.key}
                       aria-selected={cellIsSelected(rowIndex, propertyIndex + 1)}
                       onClick={(event) => selectCell(cell, event)}
@@ -783,7 +785,7 @@ export function PropertyTable({
                         kind={column.kind}
                         currency={column.currency ?? 'EUR'}
                         options={column.options}
-                        editable={row.editable}
+                        editable={row.editable && row.props[column.key]?.kind !== 'unsupported'}
                         editing={editing}
                         replacement={editing ? grid.editing?.seed : undefined}
                         onCommit={(value, direction) => {

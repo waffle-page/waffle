@@ -5,7 +5,7 @@
  * Obsidian vault "just works".
  */
 import { Document, isMap, parse as parseYaml, parseDocument } from 'yaml';
-import type { PropertyValue } from '../types';
+import type { PropertyJsonValue, PropertyValue } from '../types';
 import type { PropertyTypes } from './propertyTypes';
 
 export interface ParsedNote {
@@ -53,7 +53,7 @@ export function parseNote(markdown: string, types?: PropertyTypes): ParsedNote {
 }
 
 /**
- * Coerce a YAML scalar through its declared kind (propertyTypes.ts). Returns
+ * Coerce a YAML value through its declared kind (propertyTypes.ts). Returns
  * null on a value/kind mismatch so the caller falls back to plain inference —
  * a stray string in a money column must stay visible, not vanish.
  */
@@ -73,6 +73,7 @@ function declaredProperty(value: unknown, decl: PropertyTypes[string]): Property
       return typeof value === 'string' && ISO_DATE.test(value) ? { kind: 'date', iso: value } : null;
     case 'url': return typeof value === 'string' ? { kind: 'url', value } : null;
     case 'text': return typeof value === 'string' ? { kind: 'text', value } : null;
+    case 'list': return isPropertyList(value) ? { kind: 'list', values: value } : null;
   }
 }
 
@@ -92,14 +93,19 @@ function inferProperty(value: unknown): PropertyValue | null {
     if (/^https?:\/\//.test(value)) return { kind: 'url', value };
     return { kind: 'text', value };
   }
-  // Arrays/objects (beyond tags) have no property type yet — store as text JSON.
-  return { kind: 'text', value: JSON.stringify(value) };
+  if (isPropertyList(value)) return { kind: 'list', values: value };
+  // Preserve JSON-compatible YAML structures as explicitly read-only. They
+  // must never masquerade as scalar text: editing that text would rewrite an
+  // array/map as a YAML scalar and corrupt the user's property shape.
+  return isPropertyJsonValue(value) ? { kind: 'unsupported', value } : null;
 }
 
 /**
- * PropertyValue → the YAML scalar that round-trips back through parseNote.
+ * PropertyValue → the YAML value that round-trips back through parseNote.
  * Kinds a bare scalar can't carry (money amount, select option, duration
- * seconds) rely on the key's declaration in `.waffle/properties.json`.
+ * seconds) rely on the key's declaration in `.waffle/properties.json`; list
+ * remains a sequence. `unsupported` is not authorable, but retaining its
+ * inverse makes internal transformations shape-preserving.
  */
 export function propertyToYaml(p: PropertyValue): unknown {
   switch (p.kind) {
@@ -111,6 +117,8 @@ export function propertyToYaml(p: PropertyValue): unknown {
     case 'duration': return p.seconds;
     case 'date': return p.iso;
     case 'coords': return [p.lat, p.lng];
+    case 'list': return p.values;
+    case 'unsupported': return p.value;
   }
 }
 
@@ -150,6 +158,14 @@ export function fromEavColumns(kind: string, text: string | null, num: number | 
     case 'select': return text !== null ? { kind, option: text } : null;
     case 'url': return text !== null ? { kind, value: text } : null;
     case 'checkbox': return num !== null ? { kind, value: num === 1 } : null;
+    case 'list': {
+      const value = parseJson(text);
+      return isPropertyList(value) ? { kind, values: value } : null;
+    }
+    case 'unsupported': {
+      const value = parseJson(text);
+      return isPropertyJsonValue(value) ? { kind, value } : null;
+    }
     default: return null;
   }
 }
@@ -166,5 +182,36 @@ export function toEavColumns(p: PropertyValue): { kind: string; text: string | n
     case 'select': return { kind: p.kind, text: p.option, num: null, aux: null };
     case 'url': return { kind: p.kind, text: p.value, num: null, aux: null };
     case 'checkbox': return { kind: p.kind, text: null, num: p.value ? 1 : 0, aux: null };
+    case 'list': return { kind: p.kind, text: JSON.stringify(p.values), num: null, aux: null };
+    case 'unsupported': return { kind: p.kind, text: JSON.stringify(p.value), num: null, aux: null };
+  }
+}
+
+/** Scalar sequence carrier; Obsidian documents text, numbers, and links-as-text. */
+function isPropertyList(value: unknown): value is Array<string | number | boolean | null> {
+  return Array.isArray(value) && value.every((item) =>
+    item === null || typeof item === 'string' || typeof item === 'boolean' || (typeof item === 'number' && Number.isFinite(item)),
+  );
+}
+
+function isPropertyJsonValue(value: unknown, seen = new Set<object>()): value is PropertyJsonValue {
+  if (value === null || typeof value === 'string' || typeof value === 'boolean') return true;
+  if (typeof value === 'number') return Number.isFinite(value);
+  if (typeof value !== 'object' || seen.has(value)) return false;
+  seen.add(value);
+  const valid = Array.isArray(value)
+    ? value.every((item) => isPropertyJsonValue(item, seen))
+    : Object.getPrototypeOf(value) === Object.prototype &&
+      Object.values(value as Record<string, unknown>).every((item) => isPropertyJsonValue(item, seen));
+  seen.delete(value);
+  return valid;
+}
+
+function parseJson(text: string | null): unknown {
+  if (text === null) return undefined;
+  try {
+    return JSON.parse(text);
+  } catch {
+    return undefined;
   }
 }

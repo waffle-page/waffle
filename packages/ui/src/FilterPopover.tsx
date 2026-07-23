@@ -38,6 +38,7 @@ const OPS: Record<string, Array<{ cmp: FilterCondition['cmp']; label: string }>>
   text: [{ cmp: 'eq', label: 'is' }, { cmp: 'ne', label: 'is not' }, { cmp: 'contains', label: 'contains' }],
   select: [{ cmp: 'eq', label: 'is' }, { cmp: 'ne', label: 'is not' }],
   url: [{ cmp: 'contains', label: 'contains' }, { cmp: 'eq', label: 'is' }],
+  list: [{ cmp: 'contains', label: 'contains' }],
   number: [{ cmp: 'eq', label: '=' }, { cmp: 'ne', label: '≠' }, { cmp: 'lt', label: '<' }, { cmp: 'lte', label: '≤' }, { cmp: 'gt', label: '>' }, { cmp: 'gte', label: '≥' }],
   money: [{ cmp: 'lt', label: '<' }, { cmp: 'lte', label: '≤' }, { cmp: 'gt', label: '>' }, { cmp: 'gte', label: '≥' }, { cmp: 'eq', label: '=' }],
   duration: [{ cmp: 'lt', label: '<' }, { cmp: 'gte', label: '≥' }],

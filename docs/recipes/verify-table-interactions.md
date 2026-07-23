@@ -52,7 +52,9 @@ flowchart LR
 | --- | --- | --- | --- | --- | --- |
 | Note property, editable kind | Yes | Yes | Yes | Yes | Yes |
 | Note checkbox property | Yes | Space/double-click toggles | Yes | `true` / `false` | Recognized boolean only |
+| Note list property | Yes | JSON array | Yes | Compact JSON array | Valid scalar JSON array only |
 | Note `duration` / `coords` | Yes | No | Yes | Display form | No |
+| Note unsupported YAML structure | Yes | No; bulk/fill also skip | Yes | Compact JSON | No |
 | Title | Yes | No; double-click opens an openable item | No | Filename-derived title | Existing title is unchanged |
 | Link/file/dashboard property | Yes | No | No | Yes | No |
 | Group header / ghost create row | No | Ghost title input only | No | No | No |
@@ -114,6 +116,8 @@ Display localization must not leak into canonical clipboard values.
 | Checkbox | `true` or `false` |
 | Money | Unlocalized amount; target column supplies currency |
 | Date | Stored ISO value |
+| List | Compact JSON array; remains one TSV cell even when an item contains a delimiter |
+| Unsupported YAML structure | Compact JSON; read-only on paste |
 | Duration / coordinates | Current display representation; read-only on paste |
 | Missing property | Empty field |
 
@@ -147,6 +151,7 @@ This is the pre-Slice-A spreadsheet append flow and remains supported:
 - Existing columns map by header or current position.
 - A header row may declare new property columns.
 - New column kinds infer only when all non-empty values agree; otherwise text.
+- Compact JSON arrays unanimously infer a `list` column, not scalar `text`.
 - Every new note is created with complete frontmatter in one write and rescanned.
 
 ## Column presentation contract
@@ -267,7 +272,22 @@ Record the commit, browser, spreadsheet application, and fixture topping count.
 ### 9. Regression surfaces
 
 - Bulk-edit at least two selected note rows.
-- Paste-append with no active cell, including header-based column inference.
+- In the fixture's `dietary` list column, double-click a cell and confirm the
+  editor contains a JSON array. Add/remove an item, commit, reload, and inspect
+  the note: the frontmatter value must remain a YAML sequence.
+- Copy a list through a real spreadsheet and paste it back into an existing
+  list column; confirm the item array survives exactly.
+- Bulk-edit the list with a JSON array, then fill it down; inspect every target
+  note for one sequence-valued frontmatter key and one row-batched write.
+- Try malformed JSON and a JSON object in a list editor/paste. The editor must
+  remain invalid and the prior sequence must survive.
+- Add a temporary nested sequence/map property directly to a fixture note,
+  scan, and confirm it is visible but read-only. Edit another property in that
+  row and confirm the nested YAML remains structurally unchanged. If the key
+  has a `list` declaration, confirm single edit, paste, bulk edit, and
+  fill-down still skip that individual unsupported value.
+- Paste-append with no active cell, including header-based column inference
+  for a new column of JSON arrays; confirm it infers `list`, not `text`.
 - Create a note through the ghost row.
 - Sort and group; confirm cell selection reconciles safely.
 - Delete a row through the bulk-selection flow and confirm `.trash/` semantics.
@@ -312,4 +332,5 @@ Table acceptance:
 - Keyboard/screen-reader semantics: PASS|FAIL
 - Resize/reorder/sticky/migration: PASS|FAIL
 - Fill-down + row-batched writes: PASS|FAIL
+- List edit/copy/paste/inference + unsupported-structure safety: PASS|FAIL
 ```
