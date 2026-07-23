@@ -57,14 +57,14 @@ Contribution rides the existing catalog protocol: anonymous, opt-out-able, k-thr
 - **Library**: status chip + your rating on cards; filter/sort/group by `interaction.status`, `interaction.rating` in any view (the view engine resolves interaction keys per-owner at query time — they are *not* properties, because properties are shared).
 - **Add-flow & discovery**: every result carries the overlay — *saved · Read · 8/10 · ★4.3 Amazon · ★7.9 Waffle* — so "have I already read/been/bought this?" is answered at a glance, before saving.
 
-## Schema (migration v2)
+## Schema (migration v2, PK widened by v4)
 
 ```sql
 status_sets(id, name, labels)                        -- labels: JSON slot→label
 status_set_bindings(set_id, match_kind, match_value) -- 'schema_type'|'tag' → set
-interactions(owner_id, entity_kind, entity_key,      -- PK; entity_kind='url' for now
-             set_id, slot, rating, note,
-             status_at, rated_at, updated_at)
+interactions(owner_id, entity_kind, entity_key,      -- entity_kind='url' for now
+             set_id, slot, rating, note,             -- PK = (owner, kind, key, set_id)
+             status_at, rated_at, updated_at)        --   since v4 (Decision 1b)
 ```
 
 Local-first like everything else; syncs only to *your own* devices (paid sync tier), never into shared folders. Server-side aggregation consumes contributions, not the table.
