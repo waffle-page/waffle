@@ -23,6 +23,7 @@ import { LinkDetail } from '../editor/LinkDetail';
 import { findNoteByTitle } from '../editor/resolve';
 import { ImportDialog } from './ImportDialog';
 import { syncObsidian } from '../importer/obsidianImport';
+import { writeBackView, writeBackViewRemoval } from '../importer/baseWriteback';
 import './TableLayout'; // registers the 'table' layout (same load-time pattern as @waffle/ui's entries)
 
 /** cfg.filters is a flat AND of cmps in v1 — the popover edits exactly that. */
@@ -232,6 +233,16 @@ export function Library() {
     const next: FolderView = { ...current, layout: layout ?? current.layout, cfg: { ...current.cfg, ...cfgPatch } };
     setViews(viewsRef.current.map((v) => (v.id === next.id ? next : v)));
     await saveViewState(next.id, next.layout, next.cfg);
+    // Derived views write back into their .base (maximum sync); a 'frozen'
+    // outcome means the state is inexpressible there — the view is simply
+    // Waffle-owned from here on, per the ownership rule.
+    if (next.cfg.origin) {
+      try {
+        if ((await writeBackView(await getVaultFs(), next)) === 'synced') setViews(await listViews(selectedRef.current));
+      } catch (e) {
+        console.warn('base write-back failed', e);
+      }
+    }
     // Layout switches requery too when grouped: sections exist only for groupable layouts.
     if ('sort' in cfgPatch || 'filters' in cfgPatch || 'groupBy' in cfgPatch || (layout !== undefined && next.cfg.groupBy)) {
       const loaded = await queryRows(selectedRef.current, next);
@@ -247,6 +258,15 @@ export function Library() {
   };
 
   const onDeleteView = async (id: string): Promise<void> => {
+    const target = viewsRef.current.find((v) => v.id === id);
+    // Derived views must also leave the .base, or the next sync resurrects them.
+    if (target?.cfg.origin) {
+      try {
+        await writeBackViewRemoval(await getVaultFs(), target);
+      } catch (e) {
+        console.warn('base write-back (removal) failed', e);
+      }
+    }
     await deleteView(id);
     const remaining = viewsRef.current.filter((v) => v.id !== id);
     setViews(remaining);
@@ -262,6 +282,14 @@ export function Library() {
   const onRenameView = async (id: string, name: string): Promise<void> => {
     await renameView(id, name);
     setViews(viewsRef.current.map((v) => (v.id === id ? { ...v, name } : v)));
+    const renamed = viewsRef.current.find((v) => v.id === id);
+    if (renamed?.cfg.origin) {
+      try {
+        if ((await writeBackView(await getVaultFs(), { ...renamed, name })) === 'synced') setViews(await listViews(selectedRef.current));
+      } catch (e) {
+        console.warn('base write-back (rename) failed', e);
+      }
+    }
   };
 
   const openFilters = async (): Promise<void> => {

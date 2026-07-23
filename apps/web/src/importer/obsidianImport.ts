@@ -151,7 +151,8 @@ export async function syncObsidian(fs: VaultFs, db: SqlDriver): Promise<SyncResu
         continue;
       }
       if (match.cfg.origin!.spec !== d.spec) {
-        await saveViewState(match.id, d.layout, { ...d.cfg, origin: { base: d.base, view: d.view, spec: d.spec } });
+        // Waffle-side fields (groupBy) survive base-driven updates.
+        await saveViewState(match.id, d.layout, { ...d.cfg, groupBy: match.cfg.groupBy, origin: { base: d.base, view: d.view, spec: d.spec } });
         result.viewsUpdated.push({ folder: d.folderName, name: match.name });
       }
     }
@@ -171,9 +172,40 @@ export async function syncObsidian(fs: VaultFs, db: SqlDriver): Promise<SyncResu
   return result;
 }
 
-/** Canonical spec of a view's imported state — origin excluded, key order fixed by construction. */
-function specOf(layout: string, cfg: ViewCfg): string {
-  return JSON.stringify({ layout, sort: cfg.sort, filters: cfg.filters, groupBy: cfg.groupBy, columns: cfg.columns ?? null });
+/**
+ * Canonical spec of a view's SYNCED state — origin excluded, key order fixed by
+ * construction. groupBy is deliberately absent: Bases can't express it, so it
+ * is a Waffle-side field that neither marks divergence nor writes back
+ * (ADR-018 field ownership, per field).
+ */
+export function specOf(layout: string, cfg: ViewCfg): string {
+  return JSON.stringify({ layout, sort: cfg.sort, filters: cfg.filters, columns: cfg.columns ?? null });
+}
+
+/**
+ * Re-derive one view from a base file exactly as the sync would import it —
+ * the write-back path uses this to canonicalize after patching the file, so
+ * origin.spec always equals what the next sync computes (anti-flap).
+ */
+export async function reimportView(
+  fs: VaultFs,
+  basePath: string,
+  viewName: string,
+): Promise<{ layout: string; cfg: ViewCfg; baseChildren: FilterNode[] } | null> {
+  const kinds = await loadPropertyTypes(fs);
+  let doc: BaseFile;
+  try {
+    doc = (parseYaml(new TextDecoder().decode(await fs.read(basePath))) ?? {}) as BaseFile;
+  } catch {
+    return null;
+  }
+  const skips: string[] = [];
+  const baseFilter = parseFilterBlock(doc.filters, kinds, skips);
+  const baseChildren = baseFilter ? (baseFilter.op === 'and' ? baseFilter.children : [baseFilter]) : [];
+  const v = (doc.views ?? []).find((view) => (view.name?.trim() || 'Imported view') === viewName);
+  if (!v) return null;
+  const planned = planViewImport(v, baseFilter, kinds);
+  return { layout: planned.layout, cfg: planned.cfg, baseChildren };
 }
 
 // ── Bases parsing (the documented subset) ────────────────────────────────────
