@@ -1,0 +1,252 @@
+# Manual acceptance: table interactions
+
+This is the executable specification for Waffle's table interaction quarantine:
+
+- `packages/ui/src/tableGridState.ts` owns pure selection/editing transitions.
+- `packages/ui/src/PropertyTable.tsx` owns DOM events, focus, clipboard
+  serialization, and row virtualization.
+- `apps/web/src/library/TableLayout.tsx` owns typed paste planning, optimistic
+  projection, note creation, and mutation callbacks.
+- `apps/web/src/library/propertyWrite.ts` owns the file-first property write.
+
+Run the relevant sections after any change to those files, table view config,
+property parsing, grouping, or vault rescanning. Slice A/B/C work is not
+complete until this specification passes, along with typecheck and build.
+
+## Non-negotiable invariants
+
+1. A cell is identified by stable `(item id, column key)`, never by a mounted
+   DOM node or transient row index.
+2. Selection is one anchor/focus pair. Its range is the rectangle between
+   those cells in the current visible row/column projection.
+3. Virtualization may unmount selected rows. The actively edited row stays
+   mounted so an uncommitted native-input draft survives scrolling.
+4. Only vault-backed notes are editable. Link, file, and dashboard rows remain
+   visible but read-only until ADR-013 metadata write-back exists.
+5. Every mutation is file-first. Compose one patch per note, write that note
+   once, run `rescanFile`, then requery. Never patch index tables directly.
+6. Empty input means “clear.” Invalid non-empty input must never be interpreted
+   as “clear” or destroy the previous value.
+7. Multiple rapid commits to the same note must serialize without losing an
+   earlier property patch.
+
+```mermaid
+flowchart LR
+    E["Pointer, key, or clipboard event"] --> S["tableGridState transition"]
+    E --> P["PropertyTable callback"]
+    P --> O["Optimistic property projection"]
+    P --> C["Compose one patch per note"]
+    C --> W["Write vault file once"]
+    W --> R["rescanFile"]
+    R --> Q["Requery and refresh in place"]
+```
+
+## Cell capabilities
+
+| Cell | Select and navigate | Edit | Clear | Copy | Paste target |
+| --- | --- | --- | --- | --- | --- |
+| Note property, editable kind | Yes | Yes | Yes | Yes | Yes |
+| Note checkbox property | Yes | Space/double-click toggles | Yes | `true` / `false` | Recognized boolean only |
+| Note `duration` / `coords` | Yes | No | Yes | Display form | No |
+| Title | Yes | No; double-click opens an openable item | No | Filename-derived title | Existing title is unchanged |
+| Link/file/dashboard property | Yes | No | No | Yes | No |
+| Group header / ghost create row | No | Ghost title input only | No | No | No |
+
+The Title behavior is deliberate in the shipped implementation: renaming a
+title is a vault-file move and requires its own file-first rename contract. Do
+not silently turn it into a frontmatter edit.
+
+## Interaction matrix
+
+### Selected, not editing
+
+| Input | Required result |
+| --- | --- |
+| Single click | Select that cell; show the active outline; do not edit |
+| Shift-click | Extend from the existing anchor to a rectangular range |
+| Arrow | Move the active cell one row/column, clamped at the grid edge |
+| Shift-arrow | Extend the rectangular range while preserving the anchor |
+| Tab / Shift-Tab | Move right / left, clamped at the row edge |
+| Home / End | Move to Title / last property in the same row |
+| Enter | Begin editing an editable property |
+| Printable character | Begin replacement editing with that character |
+| Space on checkbox | Toggle once without opening an editor |
+| Delete / Backspace | Clear editable property cells in the selected range |
+| Escape | Clear the cell selection |
+| Copy | Put the selected rectangle on the clipboard as TSV |
+| Paste | Use the active cell as the top-left anchor |
+
+Group headers are absent from the row projection: navigation moves from the
+last row of one group directly to the first row of the next.
+
+### Editing
+
+| Input | Required result |
+| --- | --- |
+| Text entry | Update only the native editor draft |
+| Enter | Commit and select the cell below |
+| Tab / Shift-Tab | Commit and select the cell right / left |
+| Escape | Cancel and restore the original value |
+| Blur | Commit without movement |
+| Scroll offscreen | Keep the editor and its uncommitted draft mounted |
+
+After commit/cancel, keyboard focus returns to the grid. A sort, refresh, or
+column change must either preserve stable selection identities or clear stale
+selection; it must never transfer selection to another item.
+
+## Clipboard contract
+
+Copy uses `text/plain` TSV with `\t` between columns and `\n` between rows.
+Display localization must not leak into canonical clipboard values.
+
+| Kind | Clipboard value |
+| --- | --- |
+| Title, text, URL | Raw string |
+| Select | Option string |
+| Number | Unlocalized decimal string |
+| Checkbox | `true` or `false` |
+| Money | Unlocalized amount; target column supplies currency |
+| Date | Stored ISO value |
+| Duration / coordinates | Current display representation; read-only on paste |
+| Missing property | Empty field |
+
+TSV cells containing literal tabs or newlines are not escaped in the current
+v1 format. That limitation must remain explicit until a quoted-field parser
+and serializer land together.
+
+### Paste with an active cell
+
+- Source rows and columns map positionally from the anchor.
+- Cells beyond the last visible property column are ignored.
+- Existing visible row offsets are consumed even when a row is read-only;
+  read-only rows remain unchanged.
+- Empty fields clear editable existing properties.
+- Invalid non-empty typed values leave the existing property unchanged and
+  surface a failure; they do not clear it.
+- A pasted Title is ignored for an existing row.
+- Each affected existing note receives one composed file write and one rescan.
+- Rows beyond the visible result set become new notes when the view has a
+  vault directory. A pasted Title supplies their filename; otherwise they use
+  a unique `Untitled` filename.
+- Each overflow note is created with complete frontmatter in one file write,
+  followed by one targeted rescan.
+
+### Paste with no active cell
+
+This is the pre-Slice-A spreadsheet append flow and remains supported:
+
+- The first source column is the note title.
+- Existing columns map by header or current position.
+- A header row may declare new property columns.
+- New column kinds infer only when all non-empty values agree; otherwise text.
+- Every new note is created with complete frontmatter in one write and rescanned.
+
+## Manual procedure
+
+### 1. Setup
+
+1. Run `pnpm dev`.
+2. Open `?dev`.
+3. Select **Create fixture vault**, then **Scan vault**.
+4. Return to the library and choose the Table layout.
+5. Never use **Open folder…** for acceptance; the OPFS fixture is the only
+   permitted target.
+
+Record the commit, browser, spreadsheet application, and fixture topping count.
+
+### 2. Selection and navigation
+
+- Single-click a populated text cell. Confirm an outline and no input.
+- Double-click it. Confirm exactly one editor.
+- Escape; confirm the original value.
+- Select a cell and type one printable character. Confirm replacement, not
+  append.
+- Exercise all arrows, Tab, Shift-Tab, Home, and End at interior and edge cells.
+- Build a 2×2 range with Shift-arrows, then with Shift-click.
+- Enable grouping and repeat navigation across a group boundary.
+
+### 3. Edit and checkbox movement
+
+- Commit edits with Enter, Tab, and Shift-Tab; confirm down/right/left movement.
+- Toggle a checkbox with Space and with double-click; each action toggles once.
+- Start an edit, change the draft, scroll the row fully offscreen, return, and
+  confirm the draft survived. Escape and confirm the canonical value returns.
+
+### 4. Copy and real-spreadsheet round-trip
+
+- Select at least two rows containing Title, checkbox, number/money, and date.
+- Copy into Numbers, Excel, or Google Sheets.
+- Confirm booleans, unlocalized numerics, ISO dates, blank cells, and rectangle
+  shape.
+- Edit the cells in the spreadsheet, copy them back, select an anchor in
+  Waffle, and paste.
+- Reload Waffle and confirm the values survived the file/rescan/requery loop.
+
+### 5. Paste, overflow, and clearing
+
+- Paste a 2×2 rectangle onto existing editable notes; reload and verify.
+- Include a blank field and confirm that property alone is removed.
+- Paste across a read-only row; confirm its file and displayed properties do
+  not change.
+- Paste more rows than remain in the view. Confirm one new note per overflow
+  row, unique titles, and complete frontmatter after reload.
+- Select a rectangular note-property range and test Delete and Backspace.
+- Include Title and read-only cells in a range; confirm only editable note
+  properties clear.
+
+### 6. Failure safety and rapid writes
+
+- Give a number cell a recognizable value. Type an alphabetic replacement and
+  press Enter. The prior number must remain; invalid non-empty input must not
+  become a clear operation.
+- Paste an unrecognized token into a checkbox and invalid text into a
+  number/money/date cell. Existing values must remain.
+- Rapidly commit two different properties on the same note, then reload and
+  inspect the note frontmatter. Both patches must survive.
+- Trigger several fast edits while observing the busy/error surface. It must
+  not report idle while a write is pending or let an older failure roll back a
+  newer successful optimistic patch.
+
+### 7. Regression surfaces
+
+- Bulk-edit at least two selected note rows.
+- Paste-append with no active cell, including header-based column inference.
+- Create a note through the ghost row.
+- Sort and group; confirm cell selection reconciles safely.
+- Delete a row through the bulk-selection flow and confirm `.trash/` semantics.
+
+### 8. Twenty-thousand-row virtualization
+
+1. In `?dev`, select **Seed 20,000 toppings**.
+2. Return to the Table layout.
+3. Confirm mounted row count remains proportional to the viewport, not 20,000.
+4. Select a cell, scroll until its row unmounts, then press an arrow key.
+   Confirm movement uses stable identities and returns to the adjacent cell.
+5. Repeat with an active editor; confirm its row stays mounted and its draft
+   survives.
+6. Clear seed data and rescan the fixture when finished.
+
+### 9. Accessibility
+
+- Reach the grid and every operation above using the keyboard alone.
+- Confirm the active cell has a visible focus indicator.
+- With a screen reader or accessibility inspector, confirm the grid exposes
+  the active row, column, value, and edit state—not merely a visual outline.
+- Confirm every cell in a selected range reports selected state consistently.
+
+## Completion record
+
+Copy this into the commit or PR body:
+
+```text
+Table acceptance:
+- Fixture: <count> toppings, OPFS only
+- Browser: <browser/version>
+- Selection/navigation/editing: PASS|FAIL
+- TSV copy/paste + <spreadsheet>: PASS|FAIL
+- Row-batched writes/overflow/clear: PASS|FAIL
+- Bulk edit/paste-append/grouping/ghost row/delete: PASS|FAIL
+- Invalid input + rapid same-note writes: PASS|FAIL
+- 20k virtualization/editor pinning: PASS|FAIL
+- Keyboard/screen-reader semantics: PASS|FAIL
+```

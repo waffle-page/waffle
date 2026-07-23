@@ -3,6 +3,7 @@
  * presentation: rows and columns arrive as props; mutation callbacks keep
  * vault writes in the app. Row-virtualized like VirtualList, with interaction
  * state delegated to the quarantined tableGridState.ts state machine.
+ * Executable contract: docs/recipes/verify-table-interactions.md.
  */
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState, type CSSProperties, type ClipboardEvent, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react';
 import { defaultRangeExtractor, useVirtualizer, type Range } from '@tanstack/react-virtual';

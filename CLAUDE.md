@@ -88,7 +88,15 @@ The table now also has Airtable-grade cell/range selection, keyboard navigation
 and commit movement, type-to-replace, canonical TSV copy, paste-at-anchor with
 overflow note creation, and notes-only range clearing. Its
 selection/editing/virtualization state machine is quarantined in
-`packages/ui/src/tableGridState.ts`.
+`packages/ui/src/tableGridState.ts`; its executable acceptance contract is
+`docs/recipes/verify-table-interactions.md`.
+
+**Slice A quality gates before Slice B:** the 2026-07-23 self-audit confirmed
+that invalid non-empty typed/pasted values can clear or corrupt a property;
+same-note read-modify-write commits and their shared busy/rollback state are
+not coordinated; and the visual active cell is not exposed as the grid's
+accessible focus. Resolve these, then run the table acceptance contract before
+building column interaction on top.
 
 **Next, in agreed order:**
 
@@ -106,11 +114,12 @@ Known deferred gaps (each states its owner): list property kind (Obsidian
 `multitext` skips until it exists), filter NOT/negation (skipped on import),
 link/file properties (`.waffle/meta.json`, ADR-013), restore-from-trash UI,
 vault switcher (single active vault is documented v1 behavior), manual
-acceptance specs per quarantine module (docs/08 now requires them; write them
-as recipes/headers when next touching each module — from the 2026-07-23
-documentation audit), and simplification of the three large orchestrators
-(Library / TableLayout / PropertyTable) once their responsibilities stop
-fitting a short explanation — audit corrective #6, deliberately last.
+acceptance specs for the remaining quarantine modules (the table contract now
+lives at `docs/recipes/verify-table-interactions.md`; write the others as
+recipes/headers when next touching each module), and simplification of the
+three large orchestrators (Library / TableLayout / PropertyTable) once their
+responsibilities stop fitting a short explanation — audit corrective #6,
+deliberately last.
 
 **Escalation rule:** this file and the docs carry the engineering contract and
 the agreed queue — nothing more. Product direction, prioritization changes,

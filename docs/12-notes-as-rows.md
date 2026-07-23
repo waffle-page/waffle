@@ -27,6 +27,14 @@ Plan a whole wedding without a single new storage concept:
    Vendors with pre-made views + properties in one tap — the templates/AI
    surface from the original vision (AI can suggest and generate these).
 
+## Shipped table interaction contract
+
+The table's selection, editing, clipboard, paste, mutation, virtualization,
+accessibility, and regression contract is executable rather than implicit:
+[`docs/recipes/verify-table-interactions.md`](recipes/verify-table-interactions.md).
+Any change to the table quarantine, property parsing, grouping, or rescanning
+must run the relevant sections and record the result in its commit or PR.
+
 ## When notes-as-rows genuinely breaks (the deferral tests)
 
 Only these justify revisiting real user-tables:
