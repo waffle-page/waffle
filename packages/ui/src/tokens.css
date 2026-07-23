@@ -1,0 +1,107 @@
+/*
+ * Waffle design tokens — THE color/type contract (docs/02-architecture.md → Theming).
+ * Components reference these exclusively; a raw hex in a component is a
+ * review-blocker (docs/08-code-conventions.md). Themes override these values.
+ *
+ * Brand ramp: six pastels used as FILLS carrying same-hue dark ink — never as
+ * text colors. Dark mode re-derives each hue at adapted lightness/chroma.
+ */
+
+:root {
+  /* Type */
+  --font-head: 'Nunito Variable', 'Nunito', system-ui, sans-serif;
+  --font-body: 'Raleway Variable', 'Raleway', system-ui, sans-serif;
+
+  /* Brand ramp (light): fill + ink pairs */
+  --ramp-lavender: #bfb0ea;    --ink-lavender: #3f3170;
+  --ramp-aqua: #9fdae0;        --ink-aqua: #114e55;
+  --ramp-peach: #f9d3b6;       --ink-peach: #6e3d14;
+  --ramp-periwinkle: #c0ceef;  --ink-periwinkle: #26386b;
+  --ramp-mint: #a2dd93;        --ink-mint: #1f5514;
+  --ramp-blush: #fdb8b9;       --ink-blush: #6e2224;
+
+  /* Neutrals (light) */
+  --bg: #fbfaf8;
+  --surface: #ffffff;
+  --surface-2: #f3f1ec;
+  --border: #e5e2d9;
+  --text: #23212e;
+  --text-dim: #6e6b7a;
+
+  /* Accent (seed: lavender) */
+  --accent: var(--ramp-lavender);
+  --accent-ink: var(--ink-lavender);
+
+  /* Shape */
+  --radius: 12px;
+  --radius-sm: 8px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --ramp-lavender: #524a7e;    --ink-lavender: #e3dcfa;
+    --ramp-aqua: #2f6a72;        --ink-aqua: #d3f2f5;
+    --ramp-peach: #7a5230;       --ink-peach: #fbe6d4;
+    --ramp-periwinkle: #3d4f80;  --ink-periwinkle: #dce5fa;
+    --ramp-mint: #3c6b33;        --ink-mint: #dff5d8;
+    --ramp-blush: #7c3e40;       --ink-blush: #fddcdd;
+
+    --bg: #17161c;
+    --surface: #1f1e26;
+    --surface-2: #26242f;
+    --border: #34323e;
+    --text: #eceaf2;
+    --text-dim: #9b98a8;
+  }
+}
+
+:root[data-theme='light'] {
+  --ramp-lavender: #bfb0ea;    --ink-lavender: #3f3170;
+  --ramp-aqua: #9fdae0;        --ink-aqua: #114e55;
+  --ramp-peach: #f9d3b6;       --ink-peach: #6e3d14;
+  --ramp-periwinkle: #c0ceef;  --ink-periwinkle: #26386b;
+  --ramp-mint: #a2dd93;        --ink-mint: #1f5514;
+  --ramp-blush: #fdb8b9;       --ink-blush: #6e2224;
+  --bg: #fbfaf8;
+  --surface: #ffffff;
+  --surface-2: #f3f1ec;
+  --border: #e5e2d9;
+  --text: #23212e;
+  --text-dim: #6e6b7a;
+}
+
+:root[data-theme='dark'] {
+  --ramp-lavender: #524a7e;    --ink-lavender: #e3dcfa;
+  --ramp-aqua: #2f6a72;        --ink-aqua: #d3f2f5;
+  --ramp-peach: #7a5230;       --ink-peach: #fbe6d4;
+  --ramp-periwinkle: #3d4f80;  --ink-periwinkle: #dce5fa;
+  --ramp-mint: #3c6b33;        --ink-mint: #dff5d8;
+  --ramp-blush: #7c3e40;       --ink-blush: #fddcdd;
+  --bg: #17161c;
+  --surface: #1f1e26;
+  --surface-2: #26242f;
+  --border: #34323e;
+  --text: #eceaf2;
+  --text-dim: #9b98a8;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-body);
+  font-size: 0.9375rem;
+}
+
+h1, h2, h3, h4 {
+  font-family: var(--font-head);
+}
+
+button {
+  font-family: var(--font-body);
+}

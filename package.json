@@ -1,0 +1,14 @@
+{
+  "name": "waffle",
+  "private": true,
+  "version": "0.0.1",
+  "packageManager": "pnpm@11.15.1",
+  "scripts": {
+    "dev": "pnpm -C apps/web dev",
+    "build": "pnpm -r build",
+    "typecheck": "pnpm -r typecheck"
+  },
+  "devDependencies": {
+    "typescript": "^7.0.2"
+  }
+}

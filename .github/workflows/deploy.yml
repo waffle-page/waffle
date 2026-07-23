@@ -1,0 +1,45 @@
+name: Deploy
+
+# The BUILT bundle (no data, no secrets — local-first) is pushed to waffle-shell,
+# which serves GitHub Pages. Requires the SHELL_DEPLOY_KEY Actions secret (a deploy
+# key with write access to waffle-shell).
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-shell
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm -C apps/web build --base=/waffle-shell/
+      - name: Push bundle to waffle-shell
+        env:
+          DEPLOY_KEY: ${{ secrets.SHELL_DEPLOY_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          echo "$DEPLOY_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan github.com >> ~/.ssh/known_hosts
+          cd apps/web/dist
+          git init -q -b main
+          git config user.name "waffle-deploy"
+          git config user.email "deploy@waffle"
+          git add -A
+          git commit -q -m "Deploy $GITHUB_SHA"
+          git push -f -q git@github.com:waffle-page/waffle-shell.git main
