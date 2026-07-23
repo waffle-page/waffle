@@ -7,7 +7,7 @@
  * the data itself.
  */
 import { useEffect, useMemo, useState } from 'react';
-import { loadPropertyTypes, rescanFile, savePropertyTypes, type PropertyTypes, type PropertyValue } from '@waffle/core';
+import { loadPropertyTypes, propertyToYaml, rescanFile, savePropertyTypes, updateFrontmatter, type PropertyTypes, type PropertyValue } from '@waffle/core';
 import {
   EDITABLE_KINDS, PropertyTable, TableIcon, TITLE_SORT_KEY, parseCellInput, registerLayout,
   type LayoutProps, type TableColumn, type TableRowData,
@@ -18,6 +18,27 @@ import { writeNoteProperty } from './propertyWrite';
 import { loadPropertyMap, vaultDirFor } from './queries';
 
 type PropMap = Map<string, Record<string, PropertyValue>>;
+
+const PASTE_TRUE = new Set(['true', 'yes', '1']);
+const PASTE_BOOL = new Set([...PASTE_TRUE, 'false', 'no', '0']);
+const PASTE_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+/** Column kind from a pasted column's values: unanimity or bust (text). */
+function inferPasteKind(values: string[]): PropertyValue['kind'] {
+  const vs = values.map((v) => v.trim()).filter((v) => v !== '');
+  if (vs.length === 0) return 'text';
+  if (vs.every((v) => !Number.isNaN(Number(v)))) return 'number';
+  if (vs.every((v) => PASTE_DATE.test(v))) return 'date';
+  if (vs.every((v) => PASTE_BOOL.has(v.toLowerCase()))) return 'checkbox';
+  return 'text';
+}
+
+function pasteCellValue(kind: PropertyValue['kind'], raw: string, currency: string): PropertyValue | null {
+  const s = raw.trim();
+  if (s === '') return null;
+  if (kind === 'checkbox') return { kind: 'checkbox', value: PASTE_TRUE.has(s.toLowerCase()) };
+  return parseCellInput(kind, s, currency);
+}
 
 function TableLayout({ items, groups, folderId = null, onOpen, onMutated, tableConfig, onTableConfig }: LayoutProps) {
   const [propMap, setPropMap] = useState<PropMap | null>(null);
@@ -158,6 +179,58 @@ function TableLayout({ items, groups, folderId = null, onOpen, onMutated, tableC
     });
   };
 
+  /** Spreadsheet paste → notes-as-rows (docs/12 applied to ingestion). */
+  const onPasteRows = (grid: string[][]): void => {
+    if (dir === null || grid.length === 0) return;
+    void run(async () => {
+      const fs = await getVaultFs();
+      const byLower = new Map(columns.map((c) => [c.key.toLowerCase(), c] as const));
+      const first = grid[0]!.map((c) => c.trim());
+      // Header mode: a header cell names an existing column, or an empty table
+      // receives a multi-row paste (the paste brings its own schema). Otherwise
+      // cells map positionally onto the current column order.
+      const headerMode =
+        first.slice(1).some((c) => byLower.has(c.toLowerCase())) ||
+        (columns.length === 0 && grid.length > 1 && first.length > 1 && first.every((c) => c !== ''));
+      const keys: Array<string | null> = headerMode
+        ? first.map((h, i) => (i === 0 || !h || h.startsWith('$') ? null : byLower.get(h.toLowerCase())?.key ?? h))
+        : first.map((_, i) => (i === 0 ? null : columns[i - 1]?.key ?? null));
+      const dataRows = headerMode ? grid.slice(1) : grid;
+      if (dataRows.length === 0) return;
+
+      // New columns declare themselves, kind inferred from the pasted values.
+      const added: PropertyTypes = {};
+      keys.forEach((key, i) => {
+        if (!key || byLower.has(key.toLowerCase()) || types[key]) return;
+        added[key] = { kind: inferPasteKind(dataRows.map((r) => r[i] ?? '')) };
+      });
+      let nextTypes = types;
+      if (Object.keys(added).length > 0) {
+        nextTypes = { ...types, ...added };
+        await savePropertyTypes(fs, nextTypes);
+        setTypes(nextTypes);
+        onTableConfig?.({ columns: [...columns.map((c) => c.key), ...Object.keys(added)] });
+      }
+
+      for (const row of dataRows) {
+        const title = (row[0] ?? '').trim() || 'Untitled';
+        const notePath = await createNote(fs, dir, title);
+        const patch: Record<string, unknown> = {};
+        keys.forEach((key, i) => {
+          if (!key) return;
+          const kind = byLower.get(key.toLowerCase())?.kind ?? nextTypes[key]?.kind ?? 'text';
+          const currency = byLower.get(key.toLowerCase())?.currency ?? nextTypes[key]?.currency ?? 'EUR';
+          const value = pasteCellValue(kind, row[i] ?? '', currency);
+          if (value) patch[key] = propertyToYaml(value);
+        });
+        // One write per row: compose the full frontmatter, then one targeted rescan.
+        const text = new TextDecoder().decode(await fs.read(notePath));
+        await fs.write(notePath, new TextEncoder().encode(updateFrontmatter(text, patch)));
+        await rescanFile(platform.db, fs, notePath);
+      }
+    });
+  };
+
   const addColumn = (name: string, kind: PropertyValue['kind'], currency: string): void => {
     const key = name.trim();
     if (!key || key.startsWith('$') || columns.some((c) => c.key === key)) return;
@@ -253,6 +326,7 @@ function TableLayout({ items, groups, folderId = null, onOpen, onMutated, tableC
           onEditCell={onEditCell}
           canCreate={dir !== null}
           onCreateRow={onCreateRow}
+          onPasteRows={dir !== null ? onPasteRows : undefined}
           onAddColumn={() => setAddOpen((v) => !v)}
           onOpen={onOpen}
         />

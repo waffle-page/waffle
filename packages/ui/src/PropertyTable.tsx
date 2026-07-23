@@ -43,6 +43,8 @@ export interface PropertyTableProps {
   /** false ⇒ no ghost row (folder has no vault directory to create files in). */
   canCreate: boolean;
   onCreateRow: (title: string) => void;
+  /** Spreadsheet paste (Excel/Sheets/Airtable put TSV on the clipboard): rows of cells. */
+  onPasteRows?: (rows: string[][]) => void;
   onAddColumn: () => void;
   onOpen?: (item: LibraryItem) => void;
 }
@@ -62,7 +64,7 @@ const TYPE_ICON = { note: NoteIcon, link: LinkIcon, file: FileIcon, dash: DashIc
 type Entry = { header: string; count: number } | { row: TableRowData };
 
 export function PropertyTable({
-  rows, columns, groups, sort, onSort, selected, onToggleSelect, onToggleAll, onEditCell, canCreate, onCreateRow, onAddColumn, onOpen,
+  rows, columns, groups, sort, onSort, selected, onToggleSelect, onToggleAll, onEditCell, canCreate, onCreateRow, onPasteRows, onAddColumn, onOpen,
 }: PropertyTableProps) {
   const parentRef = useRef<HTMLDivElement>(null);
   const [editing, setEditing] = useState<{ id: string; key: string } | null>(null);
@@ -102,7 +104,26 @@ export function PropertyTable({
   );
 
   return (
-    <div ref={parentRef} style={{ height: '100%', overflow: 'auto' }}>
+    <div
+      ref={parentRef}
+      // tabIndex: paste events only reach a focusable element — clicking the
+      // table arms ⌘V. Pastes aimed at a cell editor or the ghost input pass through.
+      tabIndex={onPasteRows ? 0 : undefined}
+      onPaste={
+        onPasteRows
+          ? (e) => {
+              const target = e.target as HTMLElement;
+              if (editing || target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') return;
+              const text = e.clipboardData.getData('text/plain');
+              const parsed = text.replace(/\r/g, '').split('\n').filter((l) => l.trim().length > 0).map((l) => l.split('\t'));
+              if (parsed.length === 0) return;
+              e.preventDefault();
+              onPasteRows(parsed);
+            }
+          : undefined
+      }
+      style={{ height: '100%', overflow: 'auto', outline: 'none' }}
+    >
       <div style={{ minWidth: totalWidth, width: 'max-content' }}>
         <div style={{ ...rowStyle, position: 'sticky', top: 0, zIndex: 2, background: 'var(--surface)' }}>
           <div style={{ ...cellPad, justifyContent: 'center' }}>

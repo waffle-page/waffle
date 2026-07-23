@@ -24,6 +24,12 @@ import { Preview } from './Preview';
 
 const SAVE_DEBOUNCE_MS = 800;
 
+/** Clipboard images arrive named `image.png` or extensionless — mime decides. */
+const EXT_FROM_MIME: Record<string, string> = {
+  'image/png': '.png', 'image/jpeg': '.jpg', 'image/webp': '.webp', 'image/gif': '.gif', 'image/avif': '.avif',
+  'audio/webm': '.webm', 'audio/mpeg': '.mp3', 'audio/wav': '.wav',
+};
+
 type Mode = 'edit' | 'preview';
 
 export function NoteEditor({
@@ -54,6 +60,28 @@ export function NoteEditor({
     await rescanFile(platform.db, fs, path); // index mirrors the file NOW, not at the next full scan
     setDirty(false);
     setSavedAt(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
+  };
+
+  /** Pasted/dropped files → vault files beside the note + `![[…]]` embeds at `at`. */
+  const embedFiles = async (files: File[], view: EditorView, at: number): Promise<void> => {
+    // Never insert above the frontmatter block: `---` must stay line 1 or the
+    // properties stop parsing (for Obsidian too, not just our scanner).
+    const fmEnd = /^---\r?\n[\s\S]*?\r?\n---\r?\n?/.exec(view.state.doc.toString())?.[0].length ?? 0;
+    at = Math.max(at, fmEnd);
+    const fs = await getVaultFs();
+    const noteDir = path.split('/').slice(0, -1).join('/');
+    const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
+    let insert = '';
+    for (const [i, file] of files.entries()) {
+      const dot = file.name.lastIndexOf('.');
+      const ext = dot > 0 ? file.name.slice(dot) : EXT_FROM_MIME[file.type] ?? '';
+      const name = `${title}-paste-${stamp}${files.length > 1 ? `-${i + 1}` : ''}${ext}`;
+      await fs.write(noteDir ? `${noteDir}/${name}` : name, new Uint8Array(await file.arrayBuffer()));
+      await rescanFile(platform.db, fs, noteDir ? `${noteDir}/${name}` : name);
+      insert += `![[${name}]]\n`;
+    }
+    view.dispatch({ changes: { from: at, insert } });
+    setNotice(`embedded ${files.length} file${files.length > 1 ? 's' : ''}`);
   };
 
   /** Flush any pending debounced save, then leave — the host refreshes on close. */
@@ -101,6 +129,35 @@ export function NoteEditor({
           },
         }),
         EditorView.lineWrapping,
+        EditorView.domEventHandlers({
+          // Files on the clipboard (screenshots) embed; anything carrying text
+          // (Excel cells put BOTH a text and an image flavor on the pasteboard)
+          // stays a text paste — the snapshot image would be the wrong half.
+          paste: (event, v) => {
+            const files = [...(event.clipboardData?.files ?? [])];
+            if (files.length === 0 || event.clipboardData?.getData('text/plain')) return false;
+            event.preventDefault();
+            void embedFiles(files, v, v.state.selection.main.head);
+            return true;
+          },
+          // Dropping onto the open note EMBEDS — without stopPropagation the
+          // library surface underneath would file it into the folder instead.
+          drop: (event, v) => {
+            const files = [...(event.dataTransfer?.files ?? [])];
+            if (files.length === 0) return false;
+            event.preventDefault();
+            event.stopPropagation();
+            const at = v.posAtCoords({ x: event.clientX, y: event.clientY }) ?? v.state.selection.main.head;
+            void embedFiles(files, v, at);
+            return true;
+          },
+          dragover: (event) => {
+            if (!event.dataTransfer?.types.includes('Files')) return false;
+            event.preventDefault();
+            event.stopPropagation();
+            return true;
+          },
+        }),
         EditorView.updateListener.of((update) => {
           if (!update.docChanged) return;
           textRef.current = update.state.doc.toString();
