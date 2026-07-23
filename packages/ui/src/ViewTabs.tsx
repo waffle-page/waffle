@@ -3,7 +3,7 @@
  * Presentation only — CRUD happens in the host's callbacks. One inline input
  * serves both create and rename; the ⋯ menu exists only on the active tab.
  */
-import { useState, type CSSProperties } from 'react';
+import { useRef, useState, type CSSProperties } from 'react';
 import { PlusIcon } from './icons';
 
 export interface ViewTabInfo {
@@ -39,6 +39,9 @@ const tabStyle = (active: boolean): CSSProperties => ({
 
 export function ViewTabs({ views, activeId, onSelect, onCreate, onRename, onDelete, onSetDefault }: ViewTabsProps) {
   const [menuOpen, setMenuOpen] = useState(false);
+  // Menu x-anchor under the active tab, in wrapper coordinates (scroll-corrected).
+  const [menuLeft, setMenuLeft] = useState(8);
+  const scrollerRef = useRef<HTMLDivElement>(null);
   const [naming, setNaming] = useState<'create' | 'rename' | null>(null);
   const [draft, setDraft] = useState('');
   const active = views.find((v) => v.id === activeId);
@@ -53,9 +56,24 @@ export function ViewTabs({ views, activeId, onSelect, onCreate, onRename, onDele
   };
 
   return (
-    <div style={{ position: 'relative', display: 'flex', alignItems: 'center', gap: 2, padding: '0 0.6rem', borderBottom: '1px solid var(--border)', background: 'var(--surface)', overflowX: 'auto' }}>
+    // The menu must be a SIBLING of the scroller, not a child: overflow-x:auto
+    // forces overflow-y to clip too, which would swallow the dropdown.
+    <div style={{ position: 'relative', borderBottom: '1px solid var(--border)', background: 'var(--surface)' }}>
+      <div ref={scrollerRef} style={{ display: 'flex', alignItems: 'center', gap: 2, padding: '0 0.6rem', overflowX: 'auto' }}>
       {views.map((v) => (
-        <button key={v.id} onClick={() => (v.id === activeId ? setMenuOpen((o) => !o) : onSelect(v.id))} style={tabStyle(v.id === activeId)} title={v.isDefault ? `${v.name} (default)` : v.name}>
+        <button
+          key={v.id}
+          onClick={(e) => {
+            if (v.id !== activeId) {
+              onSelect(v.id);
+              return;
+            }
+            setMenuLeft(Math.max(8, e.currentTarget.offsetLeft - (scrollerRef.current?.scrollLeft ?? 0)));
+            setMenuOpen((o) => !o);
+          }}
+          style={tabStyle(v.id === activeId)}
+          title={v.isDefault ? `${v.name} (default)` : v.name}
+        >
           {v.name}
           {v.isDefault && <span aria-label="default view" style={{ fontSize: '0.6rem', color: 'var(--text-dim)' }}>●</span>}
           {v.id === activeId && <span style={{ color: 'var(--text-dim)' }}>⋯</span>}
@@ -82,8 +100,9 @@ export function ViewTabs({ views, activeId, onSelect, onCreate, onRename, onDele
           <PlusIcon />
         </button>
       )}
+      </div>
       {menuOpen && active && (
-        <div style={{ position: 'absolute', top: '100%', left: 8, zIndex: 6, display: 'flex', flexDirection: 'column', minWidth: 150, padding: 4, background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', boxShadow: '0 8px 24px rgba(0,0,0,0.18)' }}>
+        <div style={{ position: 'absolute', top: '100%', left: menuLeft, zIndex: 6, display: 'flex', flexDirection: 'column', minWidth: 150, padding: 4, background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', boxShadow: '0 8px 24px rgba(0,0,0,0.18)' }}>
           {[
             { label: 'Rename', run: () => { setNaming('rename'); setDraft(active.name); } },
             { label: active.isDefault ? 'Default view ✓' : 'Set as default', run: () => onSetDefault(active.id), disabled: active.isDefault },
