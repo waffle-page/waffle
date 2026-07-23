@@ -5,7 +5,7 @@
  * state delegated to the quarantined tableGridState.ts state machine.
  * Executable contract: docs/recipes/verify-table-interactions.md.
  */
-import { useCallback, useEffect, useMemo, useReducer, useRef, useState, type CSSProperties, type ClipboardEvent, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react';
+import { useCallback, useEffect, useId, useMemo, useReducer, useRef, useState, type CSSProperties, type ClipboardEvent, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react';
 import { defaultRangeExtractor, useVirtualizer, type Range } from '@tanstack/react-virtual';
 import type { PropertyValue } from '@waffle/core';
 import type { GroupSection, LibraryItem } from './types';
@@ -98,6 +98,10 @@ function propertyToTsv(value: PropertyValue): string {
   }
 }
 
+function domCellPart(value: string): string {
+  return `${value.length}-${encodeURIComponent(value)}`;
+}
+
 export function PropertyTable({
   rows,
   columns,
@@ -117,6 +121,7 @@ export function PropertyTable({
   onOpen,
 }: PropertyTableProps) {
   const parentRef = useRef<HTMLDivElement>(null);
+  const gridDomId = useId();
   const [grid, dispatchGrid] = useReducer(tableGridReducer, EMPTY_TABLE_GRID_STATE);
   const [draft, setDraft] = useState('');
 
@@ -169,6 +174,13 @@ export function PropertyTable({
   });
 
   const activeCell = grid.selection?.focus ?? null;
+  const cellDomId = (cell: TableGridCell): string =>
+    `${gridDomId}-r${domCellPart(cell.rowId)}-c${domCellPart(cell.columnKey)}`;
+  const virtualItems = virtualizer.getVirtualItems();
+  const activeEntryIndex = activeCell ? entryIndexByRowId.get(activeCell.rowId) : undefined;
+  const activeCellMounted =
+    activeEntryIndex !== undefined &&
+    virtualItems.some((virtualRow) => virtualRow.index === activeEntryIndex);
   useEffect(() => {
     if (!activeCell) return;
     const entryIndex = entryIndexByRowId.get(activeCell.rowId);
@@ -209,10 +221,12 @@ export function PropertyTable({
     height: '100%',
   };
 
-  const headerCell = (key: string, label: ReactNode, sortable: boolean): ReactNode => (
+  const headerCell = (key: string, label: ReactNode, columnIndex: number, sortable: boolean): ReactNode => (
     <div
       key={key}
       role="columnheader"
+      aria-colindex={columnIndex + 1}
+      aria-sort={sort?.key === key ? (sort.dir === 'asc' ? 'ascending' : 'descending') : 'none'}
       onClick={sortable ? () => onSort(key) : undefined}
       style={{
         ...cellPad,
@@ -363,13 +377,15 @@ export function PropertyTable({
     }
   };
 
+  const cellIsSelected = (rowIndex: number, columnIndex: number): boolean =>
+    !!selectionRect &&
+    rowIndex >= selectionRect.top &&
+    rowIndex <= selectionRect.bottom &&
+    columnIndex >= selectionRect.left &&
+    columnIndex <= selectionRect.right;
+
   const cellSelectionStyle = (rowIndex: number, columnIndex: number, cell: TableGridCell): CSSProperties => {
-    const inRange =
-      !!selectionRect &&
-      rowIndex >= selectionRect.top &&
-      rowIndex <= selectionRect.bottom &&
-      columnIndex >= selectionRect.left &&
-      columnIndex <= selectionRect.right;
+    const inRange = cellIsSelected(rowIndex, columnIndex);
     const active = !!grid.selection && sameTableGridCell(grid.selection.focus, cell);
     return {
       background: inRange ? 'var(--surface-2)' : undefined,
@@ -382,8 +398,11 @@ export function PropertyTable({
     <div
       ref={parentRef}
       role="grid"
-      aria-rowcount={rows.length}
+      aria-label="Library table"
+      aria-rowcount={rows.length + 1}
       aria-colcount={columnKeys.length}
+      aria-multiselectable="true"
+      aria-activedescendant={activeCell && activeCellMounted ? cellDomId(activeCell) : undefined}
       tabIndex={0}
       onKeyDown={onGridKeyDown}
       onCopy={onCopy}
@@ -391,12 +410,12 @@ export function PropertyTable({
       style={{ height: '100%', overflow: 'auto', outline: 'none' }}
     >
       <div style={{ minWidth: totalWidth, width: 'max-content' }}>
-        <div role="row" style={{ ...rowStyle, position: 'sticky', top: 0, zIndex: 2, background: 'var(--surface)' }}>
-          <div role="columnheader" style={{ ...cellPad, justifyContent: 'center' }}>
-            <input type="checkbox" checked={allSelected} onChange={onToggleAll} disabled={selectableRows.length === 0} style={{ accentColor: 'var(--accent)' }} />
+        <div role="row" aria-rowindex={1} style={{ ...rowStyle, position: 'sticky', top: 0, zIndex: 2, background: 'var(--surface)' }}>
+          <div role="presentation" style={{ ...cellPad, justifyContent: 'center' }}>
+            <input aria-label="Select all rows" type="checkbox" checked={allSelected} onChange={onToggleAll} disabled={selectableRows.length === 0} style={{ accentColor: 'var(--accent)' }} />
           </div>
-          {headerCell(TITLE_SORT_KEY, 'Title', true)}
-          {columns.map((column) => headerCell(column.key, column.key, true))}
+          {headerCell(TITLE_SORT_KEY, 'Title', 0, true)}
+          {columns.map((column, index) => headerCell(column.key, column.key, index + 1, true))}
           <button
             onClick={onAddColumn}
             title="Add property column"
@@ -407,7 +426,7 @@ export function PropertyTable({
         </div>
 
         <div style={{ height: virtualizer.getTotalSize(), position: 'relative' }}>
-          {virtualizer.getVirtualItems().map((virtualRow) => {
+          {virtualItems.map((virtualRow) => {
             const abs: CSSProperties = {
               position: 'absolute',
               top: 0,
@@ -456,16 +475,20 @@ export function PropertyTable({
             const open = onOpen && isOpenable(row.item) ? onOpen : undefined;
             const titleCell: TableGridCell = { rowId: row.item.id, columnKey: TITLE_SORT_KEY };
             return (
-              <div key={row.item.id} role="row" data-row-id={row.item.id} style={{ ...rowStyle, ...abs, background: selected.has(row.item.id) ? 'var(--surface-2)' : undefined }}>
-                <div style={{ ...cellPad, justifyContent: 'center' }}>
+              <div key={row.item.id} role="row" aria-rowindex={rowIndex + 2} data-row-id={row.item.id} style={{ ...rowStyle, ...abs, background: selected.has(row.item.id) ? 'var(--surface-2)' : undefined }}>
+                <div role="presentation" style={{ ...cellPad, justifyContent: 'center' }}>
                   {(row.editable || row.deletable) && (
-                    <input type="checkbox" checked={selected.has(row.item.id)} onChange={() => onToggleSelect(row.item.id)} style={{ accentColor: 'var(--accent)' }} />
+                    <input aria-label={`Select row ${row.item.title}`} type="checkbox" checked={selected.has(row.item.id)} onChange={() => onToggleSelect(row.item.id)} style={{ accentColor: 'var(--accent)' }} />
                   )}
                 </div>
                 <div
+                  id={cellDomId(titleCell)}
                   role="gridcell"
+                  aria-colindex={1}
+                  aria-label={`Title: ${row.item.title}`}
+                  aria-readonly="true"
                   data-column-key={TITLE_SORT_KEY}
-                  aria-selected={!!grid.selection && sameTableGridCell(grid.selection.focus, titleCell)}
+                  aria-selected={cellIsSelected(rowIndex, 0)}
                   onClick={(event) => selectCell(titleCell, event)}
                   onDoubleClick={() => open?.(row.item)}
                   title={open ? 'Double-click to open' : undefined}
@@ -488,9 +511,13 @@ export function PropertyTable({
                   return (
                     <div
                       key={column.key}
+                      id={cellDomId(cell)}
                       role="gridcell"
+                      aria-colindex={propertyIndex + 2}
+                      aria-label={`${row.item.title}, ${column.key}: ${row.props[column.key] ? propertyToTsv(row.props[column.key]!) : 'blank'}${editing ? ', editing' : ''}`}
+                      aria-readonly={!row.editable || !EDITABLE_KINDS.includes(column.kind)}
                       data-column-key={column.key}
-                      aria-selected={!!grid.selection && sameTableGridCell(grid.selection.focus, cell)}
+                      aria-selected={cellIsSelected(rowIndex, propertyIndex + 1)}
                       onClick={(event) => selectCell(cell, event)}
                       onDoubleClick={() => startEdit(cell)}
                       style={{
@@ -499,6 +526,7 @@ export function PropertyTable({
                       }}
                     >
                       <PropertyCell
+                        label={`${column.key} for ${row.item.title}`}
                         value={row.props[column.key]}
                         kind={column.kind}
                         currency={column.currency ?? 'EUR'}

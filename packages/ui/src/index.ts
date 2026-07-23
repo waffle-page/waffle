@@ -2,7 +2,7 @@ export * from './icons';
 export type { GroupSection, LibraryItem, TableViewConfig, ThumbLoader } from './types';
 export { PropertyTable, TITLE_SORT_KEY, type PropertyTableProps, type TableColumn, type TableRowData } from './PropertyTable';
 export type { TableGridCell } from './tableGridState';
-export { PropertyCell, formatProperty, parseCellInput, EDITABLE_KINDS } from './PropertyCell';
+export { PropertyCell, formatProperty, parseCellInput, EDITABLE_KINDS, type CellInputParseResult } from './PropertyCell';
 export { ViewTabs, type ViewTabInfo, type ViewTabsProps } from './ViewTabs';
 export { FilterPopover, type FilterField, type FilterCondition, type FilterPopoverProps } from './FilterPopover';
 export { ToppingCard, clampAspect } from './ToppingCard';

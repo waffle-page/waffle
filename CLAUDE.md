@@ -91,12 +91,12 @@ selection/editing/virtualization state machine is quarantined in
 `packages/ui/src/tableGridState.ts`; its executable acceptance contract is
 `docs/recipes/verify-table-interactions.md`.
 
-**Slice A quality gates before Slice B:** the 2026-07-23 self-audit confirmed
-that invalid non-empty typed/pasted values can clear or corrupt a property;
-same-note read-modify-write commits and their shared busy/rollback state are
-not coordinated; and the visual active cell is not exposed as the grid's
-accessible focus. Resolve these, then run the table acceptance contract before
-building column interaction on top.
+**Slice A hardening complete:** invalid non-empty typed/pasted values are
+rejected without aliasing clear; same-note read-modify-write commits serialize
+per vault path; pending mutation state cannot report idle or reconcile over a
+newer optimistic patch; and the grid exposes stable active-descendant,
+row/column/value/edit, and full-range selection semantics. The executable
+acceptance contract records the adversarial cases that exposed these defects.
 
 **Next, in agreed order:**
 

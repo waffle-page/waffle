@@ -6,11 +6,11 @@
  * Column kinds resolve declaration-first (.waffle/properties.json), then from
  * the data itself.
  */
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { loadPropertyTypes, propertyToYaml, rescanFile, savePropertyTypes, updateFrontmatter, type PropertyTypes, type PropertyValue } from '@waffle/core';
 import {
   EDITABLE_KINDS, PropertyTable, TableIcon, TITLE_SORT_KEY, parseCellInput, registerLayout,
-  type LayoutProps, type TableColumn, type TableGridCell, type TableRowData,
+  type CellInputParseResult, type LayoutProps, type TableColumn, type TableGridCell, type TableRowData,
 } from '@waffle/ui';
 import { getVaultFs, platform } from '../platform/instance';
 import { createNote } from './addFlows';
@@ -34,10 +34,14 @@ function inferPasteKind(values: string[]): PropertyValue['kind'] {
   return 'text';
 }
 
-function pasteCellValue(kind: PropertyValue['kind'], raw: string, currency: string): PropertyValue | null {
+function pasteCellValue(kind: PropertyValue['kind'], raw: string, currency: string): CellInputParseResult {
   const s = raw.trim();
-  if (s === '') return null;
-  if (kind === 'checkbox') return { kind: 'checkbox', value: PASTE_TRUE.has(s.toLowerCase()) };
+  if (s === '') return { ok: true, value: null };
+  if (kind === 'checkbox') {
+    return PASTE_BOOL.has(s.toLowerCase())
+      ? { ok: true, value: { kind: 'checkbox', value: PASTE_TRUE.has(s.toLowerCase()) } }
+      : { ok: false, message: 'Use true, false, yes, no, 1, or 0.' };
+  }
   return parseCellInput(kind, s, currency);
 }
 
@@ -52,6 +56,9 @@ function TableLayout({ items, groups, folderId = null, onOpen, onMutated, tableC
   const [bulkKey, setBulkKey] = useState<string | null>(null);
   const [bulkRaw, setBulkRaw] = useState('');
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const pendingMutations = useRef(0);
+  const folderIdRef = useRef(folderId);
+  folderIdRef.current = folderId;
 
   useEffect(() => {
     let dead = false;
@@ -59,7 +66,9 @@ function TableLayout({ items, groups, folderId = null, onOpen, onMutated, tableC
       const fs = await getVaultFs();
       const [map, t, d] = await Promise.all([loadPropertyMap(folderId), loadPropertyTypes(fs), vaultDirFor(folderId)]);
       if (dead) return;
-      setPropMap(map);
+      // A refresh caused by an earlier write must not replace newer optimistic
+      // patches. The last outstanding mutation performs the canonical reload.
+      if (pendingMutations.current === 0) setPropMap(map);
       setTypes(t);
       setDir(d);
     })();
@@ -145,17 +154,34 @@ function TableLayout({ items, groups, folderId = null, onOpen, onMutated, tableC
   };
 
 
-  const run = async (work: () => Promise<void>): Promise<void> => {
+  const run = async (work: () => Promise<void>, notice: string | null = null): Promise<void> => {
+    pendingMutations.current += 1;
     setBusy(true);
-    setError(null);
+    setError(notice);
     try {
       await work();
-      await onMutated?.();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
-      setPropMap(await loadPropertyMap(folderId)); // drop optimistic state, back to canon
     } finally {
-      setBusy(false);
+      try {
+        await onMutated?.();
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e));
+      }
+      pendingMutations.current -= 1;
+      if (pendingMutations.current === 0) {
+        try {
+          const refreshFolder = folderIdRef.current;
+          const canonical = await loadPropertyMap(refreshFolder);
+          if (pendingMutations.current === 0 && folderIdRef.current === refreshFolder) {
+            setPropMap(canonical);
+          }
+        } catch (e) {
+          setError(e instanceof Error ? e.message : String(e));
+        } finally {
+          if (pendingMutations.current === 0) setBusy(false);
+        }
+      }
     }
   };
 
@@ -190,6 +216,24 @@ function TableLayout({ items, groups, folderId = null, onOpen, onMutated, tableC
     });
   };
 
+  const applyBulkRaw = (): void => {
+    if (!bulkColumn) return;
+    if (bulkColumn.kind === 'checkbox') {
+      applyBulk({ kind: 'checkbox', value: bulkRaw !== 'false' });
+      return;
+    }
+    if (bulkRaw.trim() === '') {
+      setError(`${bulkColumn.key}: enter a value or use Clear property.`);
+      return;
+    }
+    const parsed = parseCellInput(bulkColumn.kind, bulkRaw, bulkColumn.currency ?? 'EUR');
+    if (!parsed.ok) {
+      setError(`${bulkColumn.key}: ${parsed.message}`);
+      return;
+    }
+    applyBulk(parsed.value);
+  };
+
   const onClearCells = (cells: TableGridCell[]): void => {
     const patches = new Map<string, Record<string, PropertyValue | null>>();
     for (const cell of cells) {
@@ -220,6 +264,7 @@ function TableLayout({ items, groups, folderId = null, onOpen, onMutated, tableC
 
     const existing = new Map<string, Record<string, PropertyValue | null>>();
     const overflow: Array<{ title: string; values: Record<string, PropertyValue | null> }> = [];
+    const invalid: string[] = [];
     grid.forEach((sourceRow, rowOffset) => {
       const target = rows[rowStart + rowOffset];
       const values: Record<string, PropertyValue | null> = {};
@@ -233,7 +278,12 @@ function TableLayout({ items, groups, folderId = null, onOpen, onMutated, tableC
         }
         const column = columns.find((candidate) => candidate.key === key);
         if (!column || !EDITABLE_KINDS.includes(column.kind)) return;
-        values[key] = pasteCellValue(column.kind, raw, column.currency ?? 'EUR');
+        const parsed = pasteCellValue(column.kind, raw, column.currency ?? 'EUR');
+        if (!parsed.ok) {
+          invalid.push(`${key}: ${parsed.message}`);
+          return;
+        }
+        values[key] = parsed.value;
       });
       if (target) {
         if (target.editable && target.item.contentRef && Object.keys(values).length > 0) {
@@ -245,7 +295,13 @@ function TableLayout({ items, groups, folderId = null, onOpen, onMutated, tableC
     });
 
     if (existing.size > 0) patchOptimistically(existing);
-    if (existing.size === 0 && overflow.length === 0) return;
+    const notice = invalid.length > 0
+      ? `Paste skipped ${invalid.length} invalid cell${invalid.length === 1 ? '' : 's'} — ${invalid[0]}`
+      : null;
+    if (existing.size === 0 && overflow.length === 0) {
+      setError(notice);
+      return;
+    }
     void run(async () => {
       const fs = await getVaultFs();
       for (const [id, values] of existing) {
@@ -260,7 +316,7 @@ function TableLayout({ items, groups, folderId = null, onOpen, onMutated, tableC
         const path = await createNote(fs, dir!, row.title, contents);
         await rescanFile(platform.db, fs, path);
       }
-    });
+    }, notice);
   };
 
   /** Spreadsheet paste → notes-as-rows (docs/12 applied to ingestion). */
@@ -296,6 +352,7 @@ function TableLayout({ items, groups, folderId = null, onOpen, onMutated, tableC
         onTableConfig?.({ columns: [...columns.map((c) => c.key), ...Object.keys(added)] });
       }
 
+      const invalid: string[] = [];
       for (const row of dataRows) {
         const title = (row[0] ?? '').trim() || 'Untitled';
         const patch: Record<string, unknown> = {};
@@ -303,12 +360,19 @@ function TableLayout({ items, groups, folderId = null, onOpen, onMutated, tableC
           if (!key) return;
           const kind = byLower.get(key.toLowerCase())?.kind ?? nextTypes[key]?.kind ?? 'text';
           const currency = byLower.get(key.toLowerCase())?.currency ?? nextTypes[key]?.currency ?? 'EUR';
-          const value = pasteCellValue(kind, row[i] ?? '', currency);
-          if (value) patch[key] = propertyToYaml(value);
+          const parsed = pasteCellValue(kind, row[i] ?? '', currency);
+          if (!parsed.ok) {
+            invalid.push(`${key}: ${parsed.message}`);
+            return;
+          }
+          if (parsed.value) patch[key] = propertyToYaml(parsed.value);
         });
         // Compose before creation: every pasted note costs one file write + one rescan.
         const notePath = await createNote(fs, dir, title, Object.keys(patch).length > 0 ? updateFrontmatter('', patch) : '');
         await rescanFile(platform.db, fs, notePath);
+      }
+      if (invalid.length > 0) {
+        setError(`Paste skipped ${invalid.length} invalid cell${invalid.length === 1 ? '' : 's'} — ${invalid[0]}`);
       }
     });
   };
@@ -384,7 +448,7 @@ function TableLayout({ items, groups, folderId = null, onOpen, onMutated, tableC
               )}
               <button
                 disabled={!bulkColumn || busy || selectedEditable === 0}
-                onClick={() => applyBulk(bulkColumn!.kind === 'checkbox' ? { kind: 'checkbox', value: bulkRaw !== 'false' } : parseCellInput(bulkColumn!.kind, bulkRaw, bulkColumn!.currency ?? 'EUR'))}
+                onClick={applyBulkRaw}
                 style={{ ...chipStyle, background: 'var(--accent)', color: 'var(--accent-ink)', opacity: !bulkColumn || busy ? 0.5 : 1 }}
               >
                 {busy ? 'Applying…' : 'Apply'}
@@ -415,7 +479,7 @@ function TableLayout({ items, groups, folderId = null, onOpen, onMutated, tableC
               <button onClick={() => { setSelected(new Set<string>()); setConfirmDelete(false); }} style={chipStyle}>Deselect</button>
             </>
           )}
-          {error && <span style={{ color: 'var(--ink-blush)', marginLeft: 'auto' }}>{error}</span>}
+          {error && <span role="alert" style={{ color: 'var(--ink-blush)', marginLeft: 'auto' }}>{error}</span>}
         </div>
       )}
 

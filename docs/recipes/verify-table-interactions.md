@@ -6,8 +6,10 @@ This is the executable specification for Waffle's table interaction quarantine:
 - `packages/ui/src/PropertyTable.tsx` owns DOM events, focus, clipboard
   serialization, and row virtualization.
 - `apps/web/src/library/TableLayout.tsx` owns typed paste planning, optimistic
-  projection, note creation, and mutation callbacks.
-- `apps/web/src/library/propertyWrite.ts` owns the file-first property write.
+  projection, note creation, pending-operation accounting, and canonical
+  reconciliation after mutations settle.
+- `apps/web/src/library/propertyWrite.ts` owns the file-first property write
+  and the per-vault-path serialization queue.
 
 Run the relevant sections after any change to those files, table view config,
 property parsing, grouping, or vault rescanning. Slice A/B/C work is not
@@ -29,6 +31,9 @@ complete until this specification passes, along with typecheck and build.
    as “clear” or destroy the previous value.
 7. Multiple rapid commits to the same note must serialize without losing an
    earlier property patch.
+8. Busy state covers writes, rescans, and requeries. Intermediate refreshes
+   must not replace newer optimistic patches; the last outstanding mutation
+   reconciles the visible property map with the SQLite mirror.
 
 ```mermaid
 flowchart LR
@@ -89,6 +94,7 @@ last row of one group directly to the first row of the next.
 | Escape | Cancel and restore the original value |
 | Blur | Commit without movement |
 | Scroll offscreen | Keep the editor and its uncommitted draft mounted |
+| Invalid non-empty draft | Keep editing, expose an inline error, and preserve the canonical value |
 
 After commit/cancel, keyboard focus returns to the grid. A sort, refresh, or
 column change must either preserve stable selection identities or clear stale
@@ -122,7 +128,8 @@ and serializer land together.
   read-only rows remain unchanged.
 - Empty fields clear editable existing properties.
 - Invalid non-empty typed values leave the existing property unchanged and
-  surface a failure; they do not clear it.
+  surface a failure; they do not clear it. Other valid cells in the same paste
+  still commit.
 - A pasted Title is ignored for an existing row.
 - Each affected existing note receives one composed file write and one rescan.
 - Rows beyond the visible result set become new notes when the view has a
@@ -197,8 +204,8 @@ Record the commit, browser, spreadsheet application, and fixture topping count.
 ### 6. Failure safety and rapid writes
 
 - Give a number cell a recognizable value. Type an alphabetic replacement and
-  press Enter. The prior number must remain; invalid non-empty input must not
-  become a clear operation.
+  press Enter. The editor must remain open with `aria-invalid` and an inline
+  error. Escape; the prior number must remain.
 - Paste an unrecognized token into a checkbox and invalid text into a
   number/money/date cell. Existing values must remain.
 - Rapidly commit two different properties on the same note, then reload and
@@ -231,7 +238,11 @@ Record the commit, browser, spreadsheet application, and fixture topping count.
 - Reach the grid and every operation above using the keyboard alone.
 - Confirm the active cell has a visible focus indicator.
 - With a screen reader or accessibility inspector, confirm the grid exposes
-  the active row, column, value, and edit state—not merely a visual outline.
+  `aria-activedescendant` pointing to a mounted cell with stable identity, and
+  confirm that cell exposes the active row, column, value, and edit state—not
+  merely a visual outline.
+- Scroll the selected row out of the virtual window. The grid may temporarily
+  omit `aria-activedescendant`; it must never reference an unmounted element.
 - Confirm every cell in a selected range reports selected state consistently.
 
 ## Completion record

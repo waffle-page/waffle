@@ -4,7 +4,7 @@
  * HTML inputs on purpose (dependency budget): the native date picker and
  * number keypad beat anything we would hand-roll.
  */
-import { useRef, useState, type CSSProperties } from 'react';
+import { useId, useRef, useState, type CSSProperties } from 'react';
 import type { PropertyValue } from '@waffle/core';
 
 /** Kinds the UI can author. duration/coords display fine but have no editor yet (recipe: docs/recipes/add-a-property-type.md). */
@@ -37,18 +37,47 @@ export function formatProperty(p: PropertyValue): string {
   }
 }
 
-/** Editor raw string → PropertyValue (null clears the key). Shared with bulk-edit surfaces. */
-export function parseCellInput(kind: PropertyValue['kind'], raw: string, currency: string): PropertyValue | null {
+export type CellInputParseResult =
+  | { ok: true; value: PropertyValue | null }
+  | { ok: false; message: string };
+
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}(T[\d:.]+(Z|[+-]\d{2}:?\d{2})?)?$/;
+
+function validIsoDate(value: string): boolean {
+  if (!ISO_DATE.test(value) || Number.isNaN(Date.parse(value))) return false;
+  const canonicalDay = new Date(`${value.slice(0, 10)}T00:00:00Z`).toISOString().slice(0, 10);
+  return canonicalDay === value.slice(0, 10);
+}
+
+/**
+ * Editor raw string → an explicit valid/invalid result. `null` means an
+ * intentional empty value only; invalid non-empty input must never alias clear.
+ */
+export function parseCellInput(kind: PropertyValue['kind'], raw: string, currency: string): CellInputParseResult {
   const s = raw.trim();
-  if (s === '') return null;
+  if (s === '') return { ok: true, value: null };
   switch (kind) {
-    case 'text': return { kind, value: s };
-    case 'url': return { kind, value: s };
-    case 'select': return { kind, option: s };
-    case 'number': return Number.isNaN(Number(s)) ? null : { kind, value: Number(s) };
-    case 'money': return Number.isNaN(Number(s)) ? null : { kind, amount: Number(s), currency };
-    case 'date': return { kind, iso: s };
-    default: return null; // checkbox toggles directly; duration/coords have no editor
+    case 'text': return { ok: true, value: { kind, value: s } };
+    case 'url': return { ok: true, value: { kind, value: s } };
+    case 'select': return { ok: true, value: { kind, option: s } };
+    case 'number': {
+      const value = Number(s);
+      return Number.isFinite(value)
+        ? { ok: true, value: { kind, value } }
+        : { ok: false, message: 'Enter a valid number.' };
+    }
+    case 'money': {
+      const amount = Number(s);
+      return Number.isFinite(amount)
+        ? { ok: true, value: { kind, amount, currency } }
+        : { ok: false, message: 'Enter a valid monetary amount.' };
+    }
+    case 'date':
+      return validIsoDate(s)
+        ? { ok: true, value: { kind, iso: s } }
+        : { ok: false, message: 'Enter a valid ISO date.' };
+    default:
+      return { ok: false, message: `${kind} values cannot be edited here.` };
   }
 }
 
@@ -65,6 +94,8 @@ function editorInitial(p: PropertyValue | undefined): string {
 const INPUT_TYPE: Partial<Record<PropertyValue['kind'], string>> = { number: 'number', money: 'number', date: 'date' };
 
 export interface PropertyCellProps {
+  /** Accessible column name for the native editor. */
+  label: string;
   value: PropertyValue | undefined;
   kind: PropertyValue['kind'];
   currency: string;
@@ -80,10 +111,11 @@ export interface PropertyCellProps {
 
 const cellText: CSSProperties = { whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' };
 
-export function PropertyCell({ value, kind, currency, options, editable, editing, replacement, onCommit, onCancel }: PropertyCellProps) {
+export function PropertyCell({ label, value, kind, currency, options, editable, editing, replacement, onCommit, onCancel }: PropertyCellProps) {
   if (editing) {
     return (
       <CellEditor
+        label={label}
         kind={kind}
         currency={currency}
         options={options}
@@ -132,7 +164,8 @@ export function PropertyCell({ value, kind, currency, options, editable, editing
   );
 }
 
-function CellEditor({ kind, currency, options, initial, onCommit, onCancel }: {
+function CellEditor({ label, kind, currency, options, initial, onCommit, onCancel }: {
+  label: string;
   kind: PropertyValue['kind'];
   currency: string;
   options?: string[];
@@ -141,25 +174,56 @@ function CellEditor({ kind, currency, options, initial, onCommit, onCancel }: {
   onCancel: () => void;
 }) {
   const [raw, setRaw] = useState(initial);
+  const [validationError, setValidationError] = useState<string | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
   // Escape must cancel, but blur fires after — route both through one gate.
   const done = useRef(false);
   const finish = (commit: boolean, move?: 'down' | 'left' | 'right'): void => {
     if (done.current) return;
+    if (!commit) {
+      done.current = true;
+      onCancel();
+      return;
+    }
+    const parsed = parseCellInput(kind, raw, currency);
+    if (!parsed.ok) {
+      setValidationError(parsed.message);
+      requestAnimationFrame(() => inputRef.current?.focus());
+      return;
+    }
     done.current = true;
-    if (commit) onCommit(parseCellInput(kind, raw, currency), move);
-    else onCancel();
+    onCommit(parsed.value, move);
   };
-  const id = useRef(`dl-${Math.random().toString(36).slice(2, 8)}`); // stable per edit session
-  const listId = kind === 'select' && options?.length ? id.current : undefined;
+  const id = useId();
+  const listId = kind === 'select' && options?.length ? `${id}-options` : undefined;
+  const errorId = validationError ? `${id}-error` : undefined;
+  const nativeType =
+    INPUT_TYPE[kind] && parseCellInput(kind, initial, currency).ok
+      ? INPUT_TYPE[kind]
+      : 'text';
   return (
-    <>
+    <div style={{ position: 'relative', width: '100%' }}>
       <input
+        ref={inputRef}
         autoFocus
-        type={INPUT_TYPE[kind] ?? 'text'}
+        type={nativeType}
+        inputMode={kind === 'number' || kind === 'money' ? 'decimal' : undefined}
         step={kind === 'money' ? '0.01' : kind === 'number' ? 'any' : undefined}
         list={listId}
         value={raw}
-        onChange={(e) => setRaw(e.target.value)}
+        aria-label={`Edit ${label}`}
+        aria-invalid={validationError ? true : undefined}
+        aria-describedby={errorId}
+        onChange={(e) => {
+          setRaw(e.target.value);
+          setValidationError(null);
+        }}
+        onPaste={(event) => {
+          const parsed = parseCellInput(kind, event.clipboardData.getData('text/plain'), currency);
+          if (parsed.ok) return;
+          event.preventDefault();
+          setValidationError(parsed.message);
+        }}
         onClick={(e) => e.stopPropagation()}
         onDoubleClick={(e) => e.stopPropagation()}
         onBlur={() => finish(true)}
@@ -184,7 +248,7 @@ function CellEditor({ kind, currency, options, initial, onCommit, onCancel }: {
           font: 'inherit',
           color: 'var(--text)',
           background: 'var(--surface)',
-          border: '1px solid var(--accent)',
+          border: `1px solid ${validationError ? 'var(--ink-blush)' : 'var(--accent)'}`,
           borderRadius: 'var(--radius-sm)',
           padding: '0.15rem 0.4rem',
           outline: 'none',
@@ -197,6 +261,27 @@ function CellEditor({ kind, currency, options, initial, onCommit, onCancel }: {
           ))}
         </datalist>
       )}
-    </>
+      {validationError && (
+        <span
+          id={errorId}
+          role="alert"
+          style={{
+            position: 'absolute',
+            top: 'calc(100% + 0.15rem)',
+            left: 0,
+            zIndex: 4,
+            padding: '0.2rem 0.4rem',
+            color: 'var(--ink-blush)',
+            background: 'var(--surface)',
+            border: '1px solid var(--border)',
+            borderRadius: 'var(--radius-sm)',
+            whiteSpace: 'nowrap',
+            fontSize: '0.72rem',
+          }}
+        >
+          {validationError}
+        </span>
+      )}
+    </div>
   );
 }

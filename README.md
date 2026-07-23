@@ -15,7 +15,7 @@ A **local-first everything-library**. Folders hold **toppings** — notes, links
 **P1 — structure + identity — shipped so far:**
 
 - Typed properties: 9 kinds, vault-level declarations at `.waffle/properties.json` (Obsidian's `types.json` pattern), frontmatter-first writes with targeted rescans.
-- The **table layout**: create-row-in-table, per-kind cell editors, bulk property edit, spreadsheet paste (Excel/Sheets/Airtable TSV → typed notes with auto-declared columns), cell/range selection, keyboard navigation, canonical TSV copy, and paste-at-anchor with overflow notes.
+- The **table layout**: create-row-in-table, validated per-kind cell editors, bulk property edit, spreadsheet paste (Excel/Sheets/Airtable TSV → typed notes with auto-declared columns), cell/range selection, keyboard navigation, canonical TSV copy, paste-at-anchor with overflow notes, serialized same-note writes, and accessible active-cell/range semantics.
 - **Saved-view manager**: named views per folder with defaults, filters compiled to SQL, property sorts, group-by in table/grid/list.
 - Per-entity **status + ratings** (multi-axis slots) with the link detail view.
 - **Paste/drop images** into notes (vault files + `![[…]]` embeds); a note's first embedded image becomes its card thumbnail.
