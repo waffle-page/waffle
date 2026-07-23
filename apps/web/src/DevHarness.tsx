@@ -114,6 +114,26 @@ export function DevHarness() {
       await refreshVaultRows();
     });
 
+  const onClearSeed = () =>
+    guard('clearing seed data…', async () => {
+      // The seeder's inverse: everything marked source='seed' + the Seed Library
+      // folder subtree ('fseed') + views hung on those folders. Vault rows untouched.
+      await platform.db.transaction(async () => {
+        await platform.db.exec(`DELETE FROM toppings_fts WHERE topping_id IN (SELECT id FROM toppings WHERE source = 'seed')`);
+        await platform.db.exec(`DELETE FROM properties WHERE topping_id IN (SELECT id FROM toppings WHERE source = 'seed')`);
+        await platform.db.exec(`DELETE FROM topping_tags WHERE topping_id IN (SELECT id FROM toppings WHERE source = 'seed')`);
+        await platform.db.exec(`DELETE FROM view_order WHERE view_id IN (SELECT id FROM views WHERE folder_id IN (SELECT id FROM folders WHERE id = 'fseed' OR parent_id = 'fseed'))`);
+        await platform.db.exec(`DELETE FROM views WHERE folder_id IN (SELECT id FROM folders WHERE id = 'fseed' OR parent_id = 'fseed')`);
+        await platform.db.exec(`DELETE FROM toppings WHERE source = 'seed'`);
+        await platform.db.exec(`DELETE FROM folders WHERE parent_id = 'fseed'`);
+        await platform.db.exec(`DELETE FROM folders WHERE id = 'fseed'`);
+      });
+      const count = await refreshCount();
+      setStatus((s) => s && { ...s, toppingCount: count });
+      setBusy('seed data cleared');
+      await refreshVaultRows();
+    });
+
   const onBench = () => guard('benchmarking…', async () => setBench(await runBench(platform.db)));
 
   const onFixture = () =>
@@ -201,6 +221,7 @@ export function DevHarness() {
         <strong>Benchmark (step 2)</strong>
         <div style={{ display: 'flex', gap: 8, margin: '0.6rem 0' }}>
           <button style={btn} onClick={onSeed} disabled={!status}>Seed 20,000 toppings</button>
+          <button style={btn} onClick={onClearSeed} disabled={!status}>Clear seed data</button>
           <button style={btn} onClick={onBench} disabled={!status || !status.toppingCount}>Run benchmark</button>
         </div>
         {bench && (

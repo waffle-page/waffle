@@ -30,6 +30,14 @@ export const clampAspect = (aspect: number | null | undefined): number =>
 export const CARD_META_H = 50;
 
 /**
+ * Whether clicking the item can open anything TODAY: vault-backed notes and
+ * links. Rows without it (seed data, files pending their viewer) must not
+ * claim a pointer cursor — a click that does nothing is a lie.
+ */
+export const isOpenable = (item: LibraryItem): boolean =>
+  (item.type === 'note' && !!item.contentRef?.endsWith('.md')) || item.type === 'link';
+
+/**
  * Card thumbnail resolution order: real thumb image → dominant color (instant
  * paint while the image decodes, or when only color is known) → generated
  * placeholder (type ramp fill + glyph).
@@ -46,6 +54,7 @@ export function ToppingCard({
   const [src, setSrc] = useState<string | null>(null);
   const hue = HUE[item.type];
   const Icon = ICON[item.type];
+  const open = onOpen && isOpenable(item) ? onOpen : undefined;
 
   useEffect(() => {
     if (!item.thumbRef || !loadThumb) {
@@ -63,7 +72,7 @@ export function ToppingCard({
 
   return (
     <div
-      onClick={onOpen ? () => onOpen(item) : undefined}
+      onClick={open ? () => open(item) : undefined}
       style={{
         height: '100%',
         boxSizing: 'border-box',
@@ -73,7 +82,7 @@ export function ToppingCard({
         border: '1px solid var(--border)',
         borderRadius: 'var(--radius)',
         overflow: 'hidden',
-        cursor: onOpen ? 'pointer' : 'default',
+        cursor: open ? 'pointer' : 'default',
       }}
     >
       <div

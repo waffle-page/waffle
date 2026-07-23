@@ -6,7 +6,7 @@
  */
 import { useMemo, type ComponentType } from 'react';
 import type { GroupSection, LibraryItem, TableViewConfig, ThumbLoader } from './types';
-import { ToppingCard } from './ToppingCard';
+import { isOpenable, ToppingCard } from './ToppingCard';
 import { VirtualGrid } from './VirtualGrid';
 import { VirtualList } from './VirtualList';
 import { VirtualMasonry } from './VirtualMasonry';
@@ -85,10 +85,11 @@ function ListLayout({ items, groups, onOpen }: LayoutProps) {
         }
         const item = items[entry.index]!;
         const Icon = TYPE_ICON[item.type];
+        const open = onOpen && isOpenable(item) ? onOpen : undefined;
         return (
           <div
-            onClick={onOpen ? () => onOpen(item) : undefined}
-            style={{ display: 'flex', alignItems: 'center', gap: 12, height: '100%', borderBottom: '1px solid var(--border)', cursor: onOpen ? 'pointer' : 'default' }}
+            onClick={open ? () => open(item) : undefined}
+            style={{ display: 'flex', alignItems: 'center', gap: 12, height: '100%', borderBottom: '1px solid var(--border)', cursor: open ? 'pointer' : 'default' }}
           >
             <Icon style={{ color: 'var(--text-dim)', fontSize: '1.1rem', flexShrink: 0 }} />
             <span style={{ fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{item.title}</span>

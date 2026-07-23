@@ -10,6 +10,7 @@ import { useVirtualizer } from '@tanstack/react-virtual';
 import type { PropertyValue } from '@waffle/core';
 import type { GroupSection, LibraryItem } from './types';
 import { PropertyCell } from './PropertyCell';
+import { isOpenable } from './ToppingCard';
 import { DashIcon, FileIcon, LinkIcon, NoteIcon, PlusIcon } from './icons';
 
 export interface TableColumn {
@@ -157,6 +158,7 @@ export function PropertyTable({
             }
             const row = entry.row;
             const Icon = TYPE_ICON[row.item.type];
+            const open = onOpen && isOpenable(row.item) ? onOpen : undefined;
             return (
               <div key={row.item.id} style={{ ...rowStyle, ...abs, background: selected.has(row.item.id) ? 'var(--surface-2)' : undefined }}>
                 <div style={{ ...cellPad, justifyContent: 'center' }}>
@@ -165,8 +167,8 @@ export function PropertyTable({
                   )}
                 </div>
                 <div
-                  onClick={onOpen ? () => onOpen(row.item) : undefined}
-                  style={{ ...cellPad, gap: 8, cursor: onOpen ? 'pointer' : 'default', fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}
+                  onClick={open ? () => open(row.item) : undefined}
+                  style={{ ...cellPad, gap: 8, cursor: open ? 'pointer' : 'default', fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}
                 >
                   <Icon style={{ color: 'var(--text-dim)', flexShrink: 0 }} />
                   <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{row.item.title}</span>
