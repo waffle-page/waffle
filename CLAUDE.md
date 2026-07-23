@@ -109,6 +109,11 @@ acceptance contract records the adversarial cases that exposed these defects.
    interaction filters), theme palette editor, Supabase auth, Capacitor shell
    (share extension), Tauri shell (native FS watching — replaces the
    per-write-site rescans with a real watcher), on-device Whisper.
+4. **P2 sharing opens with two distinct surfaces**: collaborative invite links
+   and unlisted public publishing for a single topping or folder. Public links
+   are revocable, read-only projections with stable, crawler-fetchable
+   Open Graph/Twitter Card images for WhatsApp and equivalent unfurlers. The
+   engineering contract and pre-implementation ADR gate are in `docs/04`.
 
 Known deferred gaps (each states its owner): list property kind (Obsidian
 `multitext` skips until it exists), filter NOT/negation (skipped on import),
