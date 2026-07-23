@@ -17,7 +17,7 @@ The personal-marks layer: per-user status ("reading", "want to go") and ratings 
 - The same book saved in two folders shows one status — no split-brain shelves.
 - You can rate or queue something you've *never saved* (rate straight from the discovery feed, like rating a film on IMDb without listing it).
 - In shared folders, each member's overlay is their own: Marta's "been", your "want to go", on the same place topping — exactly Google Maps shared-list semantics.
-- Toppings of type `link` reuse `toppings.content_hash` to store the canonical-URL hash, so the join is already indexed.
+- The entity key for a link is a canonical-URL hash computed by the interactions layer at mark time. (`toppings.content_hash` is NOT that hash — it is file-byte identity for the scanner's move re-association; a vault link's hash covers its `.url` carrier file.)
 
 ## Decision 1b — Multiple status AXES per type (added 2026-07-22)
 

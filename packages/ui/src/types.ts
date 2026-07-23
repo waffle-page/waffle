@@ -7,7 +7,7 @@ export interface LibraryItem {
   title: string;
   subtitle?: string;
   tags?: string[];
-  /** note/file/dash: vault-relative path · link: URL (see ADR-003). */
+  /** note/file/dash: vault-relative path · link: the carrier `.url` file's path (URL lives in the `url` property). Null for non-vault rows. */
   contentRef?: string | null;
   /** Thumbnail pipeline outputs (ADR-012): all null until generated. */
   thumbRef?: string | null;

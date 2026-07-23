@@ -105,7 +105,12 @@ selection/editing/virtualization state machine is quarantined in
 Known deferred gaps (each states its owner): list property kind (Obsidian
 `multitext` skips until it exists), filter NOT/negation (skipped on import),
 link/file properties (`.waffle/meta.json`, ADR-013), restore-from-trash UI,
-vault switcher (single active vault is documented v1 behavior).
+vault switcher (single active vault is documented v1 behavior), manual
+acceptance specs per quarantine module (docs/08 now requires them; write them
+as recipes/headers when next touching each module — from the 2026-07-23
+documentation audit), and simplification of the three large orchestrators
+(Library / TableLayout / PropertyTable) once their responsibilities stop
+fitting a short explanation — audit corrective #6, deliberately last.
 
 **Escalation rule:** this file and the docs carry the engineering contract and
 the agreed queue — nothing more. Product direction, prioritization changes,

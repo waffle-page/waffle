@@ -6,7 +6,7 @@ Load-bearing decisions, frozen 2026-07-22. Reversing any of these after P0 code 
 React + TS + Vite PWA; Capacitor for iOS/Android; Tauri 2 for desktop. The product is DOM-heavy (CodeMirror, masonry, pdf.js, sandboxed HTML previews) — native frameworks would embed webviews anyway. One codebase is the maintainability requirement made structural.
 
 ## ADR-002 — SQLite everywhere, behind one adapter
-wa-sqlite/OPFS on web; native drivers on Capacitor/Tauri. One schema, one query language, every platform. The DB is an index for private vaults (rebuildable), a cache for shared folders, and the home of datasets.
+`@sqlite.org/sqlite-wasm` (the official SQLite WASM build) over OPFS on web; native drivers on Capacitor/Tauri. One schema, one query language, every platform. The DB is an index for private vaults (rebuildable), a cache for shared folders, and the home of datasets.
 
 ## ADR-003 — Toppings: one table for all item types
 `type ∈ {note, link, file, dash}` on a single `toppings` table. Interleaved sorting, one view engine, one thumbnail pipeline, one property system. Dashboards being toppings gives them thumbnails, folders, and shareability for free.

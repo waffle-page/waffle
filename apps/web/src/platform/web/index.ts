@@ -5,9 +5,15 @@
 import type { PlatformAdapters, VaultFs } from '@waffle/core';
 import { WebDb, type DbStatus } from './webDb';
 
-/** Vault filesystem lands in P0 step 3 (File System Access API). */
+/**
+ * The web app does NOT use platform.fs: the active vault is a MUTABLE seam —
+ * `getVaultFs()` in platform/instance.ts (OPFS by default, File System Access
+ * folder when picked). platform.fs becomes real when the native shells land
+ * with one fixed vault root. This stub exists only to satisfy the adapter
+ * shape and to fail loudly if something bypasses the seam.
+ */
 const notYet = (): never => {
-  throw new Error('VaultFs: not implemented until P0 step 3 (vault engine)');
+  throw new Error('Use getVaultFs() (platform/instance.ts) — platform.fs is not the web vault seam');
 };
 const stubFs: VaultFs = {
   pickRoot: notYet,

@@ -7,11 +7,11 @@ graph TB
     subgraph Clients["One TS codebase (React + Vite, PWA-first)"]
         W[Web PWA] --- M[iOS + Android — Capacitor] --- D[Desktop — Tauri]
     end
-    subgraph Core["packages/core"]
+    subgraph Core["packages/core (+ registry in packages/ui)"]
         SQL[(SQLite: index + datasets)]
         VE[Vault engine — files canonical]
-        RR[Renderer registry]
-        CX[Connector sandbox]
+        RR[Renderer registry — packages/ui]
+        CX[Connector sandbox — planned, P2]
     end
     Clients --> Core
     subgraph Server["Supabase (P2+)"]
@@ -27,7 +27,7 @@ graph TB
 | App | React + TypeScript + Vite, PWA-first | DOM-heavy product (CodeMirror, masonry, pdf.js, iframes); RN/Flutter would wrap webviews anyway |
 | Mobile | Capacitor | Same bundle + native plugins: camera, mic, native SQLite, **share extension** ("Save to Waffle") |
 | Desktop | Tauri 2 wrapper | Native-grade FS watching for the Finder covenant; PWA alone lacks it on Safari |
-| Data | SQLite behind one adapter — wa-sqlite/OPFS (web), native drivers (Capacitor/Tauri) | One schema and query language on every platform; FTS5 for search |
+| Data | SQLite behind one adapter — `@sqlite.org/sqlite-wasm` over OPFS (web), native drivers (Capacitor/Tauri) | One schema and query language on every platform; FTS5 for search |
 | Server | Supabase — auth, shared folders (Postgres + RLS), storage, edge functions | Grants enforced in the database, not app code; deferred to P2+ |
 
 ## Two storage classes, one UI
@@ -55,7 +55,7 @@ The vault is a normal folder:
 └── .waffle/
     ├── index.sqlite             # rebuildable index — never precious
     ├── meta.json                # properties/tags for links & files
-    └── thumbs/                  # 2-size webp + blurhash cache
+    └── thumbs/                  # 480w webp + dominant color (ADR-012 as amended; 2nd size + blurhash arrive with remote images, P2)
 ```
 
 Drag in/out via Finder; the watcher follows; files moved while the app was closed re-associate by content hash. An Obsidian vault dropped in works immediately (`.md`, frontmatter → properties, tags, wikilinks, mermaid); `.base` files convert to saved views via the P1 importer; Obsidian and Waffle can point at the same folder simultaneously during transition.
@@ -90,8 +90,8 @@ User-configurable palettes, architected at the token layer so it can never requi
 
 - SQLite with proper indexes: folder view queries ~1–5 ms at 20k toppings; FTS5 search ~5–15 ms.
 - The DOM is the real risk: virtualized masonry — ~30 mounted cards regardless of collection size.
-- Images: precomputed 2-size webp + blurhash; originals never decode in the grid.
-- Cold start: the DB *is* the index; files parse incrementally via watcher — no full-vault re-read on launch.
+- Images: precomputed 480w webp + dominant-color placeholder (ADR-012 as amended); originals never decode in the grid.
+- Cold start today: the DB *is* the index; launch runs a reconciling scan (hash-diff, ms-class at current scale). Incremental watcher-driven parsing is the target state and lands with the native shells (Tauri watching); until then, app write-sites trigger targeted rescans themselves.
 - Property filters: indexed EAV (+ expression indexes materialized in the background for hot keys).
 - Web caveat: OPFS SQLite ~5× slower than native — still ms-class at this scale; mobile/desktop run native drivers.
 

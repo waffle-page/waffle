@@ -39,7 +39,7 @@ CREATE TABLE toppings (
   type         TEXT NOT NULL CHECK (type IN ('note','link','file','dash')),  -- ADR-003
   folder_id    TEXT NOT NULL REFERENCES folders(id),
   title        TEXT NOT NULL,
-  content_ref  TEXT,                       -- note/file/dash: vault-relative path · link: URL
+  content_ref  TEXT,                       -- vault rows: file path (links: the .url carrier; URL lives in properties)
   content_hash TEXT,                       -- re-association after offline moves
   thumb_ref    TEXT,                       -- key into .waffle/thumbs/
   blurhash     TEXT,

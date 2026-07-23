@@ -12,7 +12,11 @@ export interface Topping {
   type: ToppingType;
   folderId: string;
   title: string;
-  /** note/file/dash: vault-relative path · link: URL */
+  /**
+   * note/file/dash: vault-relative path. link: the carrier `.url` file's
+   * vault path for vault-scanned links (the URL itself lives in the `url`
+   * property — see scanner.writeExtras); non-vault rows may hold a URL here.
+   */
   contentRef: string | null;
   thumbRef: string | null;
   blurhash: string | null;
@@ -42,36 +46,15 @@ export interface Folder {
 }
 
 // ── Views (ADR-006) ──────────────────────────────────────────────────────────
-
-export interface View {
-  id: string;
-  folderId: string | null;                                   // null ⇒ smart folder
-  name: string;
-  layout: string;                                            // renderer registry key
-  config: ViewConfig;
-  kind: 'shared' | 'personal';
-  isDefault: boolean;
-}
-
-export interface ViewConfig {
-  filters: FilterNode | null;
-  sorts: Array<{ key: string; dir: 'asc' | 'desc' }>;
-  groupBy: string | null;
-  visibleProps: string[];
-  subtree: boolean;
-}
+// The LIVE view shapes are app/UI-level, one per concept (docs/08):
+//   apps/web/src/library/queries.ts → FolderView / ViewCfg  (persisted state)
+//   packages/ui/src/layouts.tsx     → LayoutEntry / LayoutProps (renderer registry)
+// Core carries only the filter AST, shared by view configs, the SQL compiler,
+// and the Obsidian sync.
 
 export type FilterNode =
   | { op: 'and' | 'or'; children: FilterNode[] }
   | { op: 'cmp'; key: string; cmp: 'eq' | 'ne' | 'lt' | 'lte' | 'gt' | 'gte' | 'contains' | 'tagged'; value: unknown };
-
-/** Every layout/widget: (query results → props) → component. One file per new visualization. */
-export interface Renderer<Row = unknown, Props = unknown> {
-  key: string;                                               // 'masonry' | 'table' | 'map' | 'body-map' | ...
-  toProps(rows: Row[], view: View): Props;
-  /** Component reference resolved by the UI package; core stays framework-free. */
-  componentKey: string;
-}
 
 // ── Dashboards ───────────────────────────────────────────────────────────────
 
@@ -132,6 +115,12 @@ export interface AuthContext {
 // swap in native implementations without the app noticing.
 
 export interface PlatformAdapters {
+  /**
+   * Target contract for the native shells (one fixed vault root). The web app
+   * routes vault IO through a mutable active-vault seam instead
+   * (apps/web/src/platform/instance.ts → getVaultFs) until a vault manager
+   * exists; its platform.fs is a loud stub.
+   */
   fs: VaultFs;
   db: SqlDriver;
   net: { fetch(url: string, init?: unknown): Promise<unknown> }; // CORS-free on native shells
