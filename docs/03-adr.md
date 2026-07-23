@@ -52,6 +52,8 @@ Site adapters match by host rules (password-manager style, subdomain wildcards) 
 ## ADR-016 — Notes are rows: no user-created database tables
 An "Airtable table" is a table VIEW over notes (frontmatter = columns). One mental model, files-canonical, Obsidian-portable. Real user-tables are deferred until a case passes the breakage tests (10k+ rows, seconds-frequency writes, pure relational webs, fast concurrent cell edits — docs/12); CSV→dataset via the pantry covers big-tabular analysis meanwhile.
 
+*Amended 2026-07-23:* kinds a YAML scalar can't express (select, money, duration, coords) are carried by vault-level key→kind declarations at `.waffle/properties.json` — Obsidian's `types.json` pattern, files-canonical, read by the scanner at scan time and written by the table's add-column flow. Undeclared keys fall back to value inference.
+
 ## ADR-017 — Lists reference; folders contain
 Folders are single-parent containment (where things live, files). Lists are many-to-many curated sequences referencing local toppings OR catalog entities, ordered or not, publishable as catalog objects, with derived progress from member interactions. A List is itself a topping backed by a `.list` file. (docs/11)
 
@@ -60,3 +62,9 @@ Topping-materializing connectors (contacts → CRM) merge at FIELD level: connec
 
 ## ADR-019 — Open-core boundary
 The client is open source (AGPL-3.0, this repo); the connector SDK and `waffle-schemas` open under MIT as they are extracted; the catalog contribution protocol (including its k-anonymity rules) is published; server-side catalog services (data, aggregation, ranking) are proprietary and live in a separate private repo. Public app-shell deploys carry no data and no secrets — local-first means the bundle is empty until a user brings a vault.
+
+## ADR-020 — Obsidian config sync: bidirectional, field-level ownership
+`.obsidian/types.json` and `*.base` files are vault files, so their derived state syncs at every scan — no import step. Types merge add-only (existing Waffle declarations win). Views derived from a base carry `cfg.origin = {base, view, spec}` where `spec` is the canonical last-imported state: while a view still matches `spec` it is sync-owned (auto-creates/updates/removes, self-heals duplicates); Waffle edits to a derived view write BACK into the `.base` view node via comment-preserving YAML document surgery — only owned keys (name/type/filters/order/sort), with base-level filter children structurally subtracted first. Any state Bases can't express (masonry/list layouts, edited shared conditions, unsupported operators) FREEZES the view — write nothing, report, never corrupt a user file. Fields with no Bases spelling at all (groupBy) sit outside the sync contract entirely: excluded from `spec`, preserved across updates in both directions. After every write-back the view re-derives from the new file and stores that canonical state (anti-flap); the reconcile runs in one exclusive transaction so concurrent syncs serialize. Extension recipe: `docs/recipes/extend-obsidian-sync.md`.
+
+## ADR-021 — Soft delete: files move to `.trash/`
+Deleting a topping moves its file into `.trash/` inside the vault — Obsidian's own convention, so both apps share one trash — and the targeted rescan tombstones the row. Nothing in the app hard-deletes user bytes; recovery is moving the file back (a restore UI can come later). Write sites that delete must cancel any pending debounced save first, or the save resurrects the file.

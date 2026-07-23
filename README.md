@@ -8,9 +8,21 @@ A **local-first everything-library**. Folders hold **toppings** — notes, links
 - **Private by architecture.** The app is a PWA whose bundle carries no data and no secrets. Your library lives on your device; nothing leaves it without an explicit, visible choice.
 - **Typed properties without database jargon.** An "Airtable table" here is a view over notes — frontmatter keys become columns (`docs/12-notes-as-rows.md`).
 
-## Status
+## Status (2026-07-23)
 
-Early development, moving fast. The P0 spine is complete and verified: SQLite (OPFS) index over a real vault, virtualized masonry/grid/list at 20k items, thumbnail pipeline, CodeMirror editor with live preview, add flows, and the first P1 slices — typed properties, the table view (create-row-in-table, bulk edit), per-entity status + ratings, the saved-view manager (multiple named views per folder with defaults, SQL-compiled filters, property sort, group-by), paste flows — spreadsheet cells (Excel/Sheets/Airtable) paste into a table as typed notes with auto-declared columns, images paste/drop into notes as vault files + embeds, a note's first embedded image becomes its card thumbnail — soft delete (files move to `.trash/`, Obsidian's convention), and bidirectional Obsidian config sync — `.obsidian/types.json` merges into property declarations and `.base` files become saved views at every scan, while editing a derived view in Waffle writes back into the `.base` via comment-preserving YAML surgery (only owned keys; formulas and unknown constructs untouched); inexpressible states freeze safely instead of corrupting the file, and a sync report names every compromise. See `docs/04-phases.md` for the phase ladder.
+**P0 — the spine — is complete and verified**: SQLite (OPFS) index over a real vault, virtualized masonry/grid/list smooth at 20k items, thumbnail pipeline, CodeMirror editor with Obsidian-style live preview, add flows.
+
+**P1 — structure + identity — shipped so far:**
+
+- Typed properties: 9 kinds, vault-level declarations at `.waffle/properties.json` (Obsidian's `types.json` pattern), frontmatter-first writes with targeted rescans.
+- The **table layout**: create-row-in-table, per-kind cell editors, bulk property edit, spreadsheet paste (Excel/Sheets/Airtable TSV → typed notes with auto-declared columns).
+- **Saved-view manager**: named views per folder with defaults, filters compiled to SQL, property sorts, group-by in table/grid/list.
+- Per-entity **status + ratings** (multi-axis slots) with the link detail view.
+- **Paste/drop images** into notes (vault files + `![[…]]` embeds); a note's first embedded image becomes its card thumbnail.
+- **Soft delete** to `.trash/` (ADR-021) from table selection and the editor.
+- **Bidirectional Obsidian config sync** (ADR-020): `types.json` and `.base` files sync at every scan; editing a derived view in Waffle writes back into the `.base` via comment-preserving YAML surgery; inexpressible states freeze safely, and the sync report names every compromise.
+
+**Next** (working agreements in [CLAUDE.md](CLAUDE.md)): table interaction slice A — Airtable-grade cell selection, keyboard navigation, ranges, copy/paste-at-anchor — then column resize/reorder, session undo, and the P1 remainder (status surfacing in views, theme palette editor, Supabase auth, Capacitor + Tauri shells, on-device Whisper). Phase ladder: `docs/04-phases.md`.
 
 ## Try it
 
@@ -23,6 +35,7 @@ pnpm dev        # opens the app; ?dev = dev-spine harness (seed 20k toppings, be
 
 | Doc | Contents |
 | --- | --- |
+| [CLAUDE.md](CLAUDE.md) | Working in this repo (humans and AI agents): read order, invariants, verification discipline, current position + next steps |
 | [docs/01-vision.md](docs/01-vision.md) | What Waffle is, inspirations, product pillars |
 | [docs/02-architecture.md](docs/02-architecture.md) | Stack, storage classes, Finder covenant, performance |
 | [docs/03-adr.md](docs/03-adr.md) | Architecture decision records |
