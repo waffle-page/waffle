@@ -33,10 +33,10 @@ export async function uniquePath(fs: VaultFs, dir: string, base: string, ext: st
   }
 }
 
-export async function createNote(fs: VaultFs, dir: string, rawName: string): Promise<string> {
+export async function createNote(fs: VaultFs, dir: string, rawName: string, contents = ''): Promise<string> {
   const base = (rawName.trim().replace(ILLEGAL, '') || 'Untitled').replace(/\.md$/i, '');
   const path = await uniquePath(fs, dir, base, '.md');
-  await fs.write(path, new TextEncoder().encode(''));
+  await fs.write(path, new TextEncoder().encode(contents));
   return path;
 }
 

@@ -84,21 +84,20 @@ bulk edit, spreadsheet paste with column/kind inference), saved-view manager
 group-by in table/grid/list), paste/drop images into notes + first-image note
 thumbnails, soft delete, and bidirectional Obsidian config sync.
 
+The table now also has Airtable-grade cell/range selection, keyboard navigation
+and commit movement, type-to-replace, canonical TSV copy, paste-at-anchor with
+overflow note creation, and notes-only range clearing. Its
+selection/editing/virtualization state machine is quarantined in
+`packages/ui/src/tableGridState.ts`.
+
 **Next, in agreed order:**
 
-1. **Table interaction slice A** — the Airtable feel. Decisions already made:
-   single click SELECTS a cell (breaking change from click-to-edit);
-   double-click/Enter/type-to-edit; arrows/Tab/Enter/Escape navigation with
-   commit-and-move; Shift ranges; copy selection as TSV; paste-at-anchor onto
-   existing rows (append overflow); Delete clears cells. Isolate the grid
-   state machine (selection × editing × virtualization) in its own quarantine
-   file inside `packages/ui`.
-2. **Slice B** — column resize + drag-reorder (persist widths in view config,
-   evolving `columns: string[]` → `{key, width}[]` with silent migration),
-   sticky Title column, fill-down.
-3. **Slice C** — session undo/redo (inverse patches over property writes;
+1. **Table interaction slice B** — column resize + drag-reorder (persist
+   widths in view config, evolving `columns: string[]` →
+   `{key, width}[]` with silent migration), sticky Title column, fill-down.
+2. **Slice C** — session undo/redo (inverse patches over property writes;
    deletes un-trash by stored path).
-4. **P1 remainder**: status/ratings surfacing in library views (chips +
+3. **P1 remainder**: status/ratings surfacing in library views (chips +
    interaction filters), theme palette editor, Supabase auth, Capacitor shell
    (share extension), Tauri shell (native FS watching — replaces the
    per-write-site rescans with a real watcher), on-device Whisper.

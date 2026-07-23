@@ -10,12 +10,12 @@ import { useEffect, useMemo, useState } from 'react';
 import { loadPropertyTypes, propertyToYaml, rescanFile, savePropertyTypes, updateFrontmatter, type PropertyTypes, type PropertyValue } from '@waffle/core';
 import {
   EDITABLE_KINDS, PropertyTable, TableIcon, TITLE_SORT_KEY, parseCellInput, registerLayout,
-  type LayoutProps, type TableColumn, type TableRowData,
+  type LayoutProps, type TableColumn, type TableGridCell, type TableRowData,
 } from '@waffle/ui';
 import { getVaultFs, platform } from '../platform/instance';
 import { createNote } from './addFlows';
 import { trashFile } from './deleteFlows';
-import { writeNoteProperty } from './propertyWrite';
+import { writeNoteProperties, writeNoteProperty } from './propertyWrite';
 import { loadPropertyMap, vaultDirFor } from './queries';
 
 type PropMap = Map<string, Record<string, PropertyValue>>;
@@ -119,6 +119,21 @@ function TableLayout({ items, groups, folderId = null, onOpen, onMutated, tableC
 
   const rowById = useMemo(() => new Map(rows.map((r) => [r.item.id, r])), [rows]);
 
+  const patchOptimistically = (patches: ReadonlyMap<string, Readonly<Record<string, PropertyValue | null>>>): void => {
+    setPropMap((prev) => {
+      const next = new Map(prev);
+      for (const [id, patch] of patches) {
+        const props = { ...(next.get(id) ?? {}) };
+        for (const [key, value] of Object.entries(patch)) {
+          if (value === null) delete props[key];
+          else props[key] = value;
+        }
+        next.set(id, props);
+      }
+      return next;
+    });
+  };
+
   /** Header click cycles: asc → desc → back to the recency default. */
   const onSort = (key: string): void => {
     const current = tableConfig?.sort;
@@ -147,15 +162,8 @@ function TableLayout({ items, groups, folderId = null, onOpen, onMutated, tableC
   const onEditCell = (id: string, key: string, value: PropertyValue | null): void => {
     const row = rowById.get(id);
     if (!row?.editable || !row.item.contentRef) return;
-    setPropMap((prev) => {
-      // Optimistic: the file write + rescan lag a beat; the cell must not snap back.
-      const next = new Map(prev);
-      const props = { ...(next.get(id) ?? {}) };
-      if (value === null) delete props[key];
-      else props[key] = value;
-      next.set(id, props);
-      return next;
-    });
+    // Optimistic: the file write + rescan lag a beat; the cell must not snap back.
+    patchOptimistically(new Map([[id, { [key]: value }]]));
     const path = row.item.contentRef;
     void run(async () => {
       const fs = await getVaultFs();
@@ -179,6 +187,79 @@ function TableLayout({ items, groups, folderId = null, onOpen, onMutated, tableC
     void run(async () => {
       const fs = await getVaultFs();
       for (const t of targets) await writeNoteProperty(fs, t.item.contentRef!, key, value);
+    });
+  };
+
+  const onClearCells = (cells: TableGridCell[]): void => {
+    const patches = new Map<string, Record<string, PropertyValue | null>>();
+    for (const cell of cells) {
+      const row = rowById.get(cell.rowId);
+      if (!row?.editable || !row.item.contentRef || row.props[cell.columnKey] === undefined) continue;
+      const patch = patches.get(cell.rowId) ?? {};
+      patch[cell.columnKey] = null;
+      patches.set(cell.rowId, patch);
+    }
+    if (patches.size === 0) return;
+    patchOptimistically(patches);
+    void run(async () => {
+      const fs = await getVaultFs();
+      for (const [id, patch] of patches) {
+        const path = rowById.get(id)?.item.contentRef;
+        if (path) await writeNoteProperties(fs, path, patch);
+      }
+    });
+  };
+
+  /** Selected-cell paste overwrites existing note rows, then creates overflow notes. */
+  const onPasteCells = (anchor: TableGridCell, grid: string[][]): void => {
+    if (grid.length === 0) return;
+    const rowStart = rows.findIndex((row) => row.item.id === anchor.rowId);
+    const gridColumns = [TITLE_SORT_KEY, ...columns.map((column) => column.key)];
+    const columnStart = gridColumns.indexOf(anchor.columnKey);
+    if (rowStart < 0 || columnStart < 0) return;
+
+    const existing = new Map<string, Record<string, PropertyValue | null>>();
+    const overflow: Array<{ title: string; values: Record<string, PropertyValue | null> }> = [];
+    grid.forEach((sourceRow, rowOffset) => {
+      const target = rows[rowStart + rowOffset];
+      const values: Record<string, PropertyValue | null> = {};
+      let title = 'Untitled';
+      sourceRow.forEach((raw, columnOffset) => {
+        const key = gridColumns[columnStart + columnOffset];
+        if (!key) return;
+        if (key === TITLE_SORT_KEY) {
+          title = raw.trim() || 'Untitled';
+          return;
+        }
+        const column = columns.find((candidate) => candidate.key === key);
+        if (!column || !EDITABLE_KINDS.includes(column.kind)) return;
+        values[key] = pasteCellValue(column.kind, raw, column.currency ?? 'EUR');
+      });
+      if (target) {
+        if (target.editable && target.item.contentRef && Object.keys(values).length > 0) {
+          existing.set(target.item.id, values);
+        }
+      } else if (dir !== null) {
+        overflow.push({ title, values });
+      }
+    });
+
+    if (existing.size > 0) patchOptimistically(existing);
+    if (existing.size === 0 && overflow.length === 0) return;
+    void run(async () => {
+      const fs = await getVaultFs();
+      for (const [id, values] of existing) {
+        const path = rowById.get(id)?.item.contentRef;
+        if (path) await writeNoteProperties(fs, path, values);
+      }
+      for (const row of overflow) {
+        const patch = Object.fromEntries(
+          Object.entries(row.values).flatMap(([key, value]) => value === null ? [] : [[key, propertyToYaml(value)]]),
+        );
+        const contents = Object.keys(patch).length > 0 ? updateFrontmatter('', patch) : '';
+        const path = await createNote(fs, dir!, row.title, contents);
+        await rescanFile(platform.db, fs, path);
+      }
     });
   };
 
@@ -217,7 +298,6 @@ function TableLayout({ items, groups, folderId = null, onOpen, onMutated, tableC
 
       for (const row of dataRows) {
         const title = (row[0] ?? '').trim() || 'Untitled';
-        const notePath = await createNote(fs, dir, title);
         const patch: Record<string, unknown> = {};
         keys.forEach((key, i) => {
           if (!key) return;
@@ -226,9 +306,8 @@ function TableLayout({ items, groups, folderId = null, onOpen, onMutated, tableC
           const value = pasteCellValue(kind, row[i] ?? '', currency);
           if (value) patch[key] = propertyToYaml(value);
         });
-        // One write per row: compose the full frontmatter, then one targeted rescan.
-        const text = new TextDecoder().decode(await fs.read(notePath));
-        await fs.write(notePath, new TextEncoder().encode(updateFrontmatter(text, patch)));
+        // Compose before creation: every pasted note costs one file write + one rescan.
+        const notePath = await createNote(fs, dir, title, Object.keys(patch).length > 0 ? updateFrontmatter('', patch) : '');
         await rescanFile(platform.db, fs, notePath);
       }
     });
@@ -361,6 +440,8 @@ function TableLayout({ items, groups, folderId = null, onOpen, onMutated, tableC
             setSelected((prev) => (selectable.every((id) => prev.has(id)) && selectable.length > 0 ? new Set<string>() : new Set(selectable)));
           }}
           onEditCell={onEditCell}
+          onClearCells={onClearCells}
+          onPasteCells={dir !== null ? onPasteCells : undefined}
           canCreate={dir !== null}
           onCreateRow={onCreateRow}
           onPasteRows={dir !== null ? onPasteRows : undefined}
@@ -409,4 +490,4 @@ function AddColumnForm({ existing, onSubmit, onClose }: { existing: string[]; on
 const selectStyle: React.CSSProperties = { background: 'var(--surface)', color: 'var(--text)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '0.25rem 0.45rem', fontSize: '0.8rem' };
 const chipStyle: React.CSSProperties = { ...selectStyle, cursor: 'pointer' };
 
-registerLayout({ key: 'table', label: 'Table', icon: TableIcon, component: TableLayout });
+registerLayout({ key: 'table', label: 'Table', icon: TableIcon, component: TableLayout, groupable: true });

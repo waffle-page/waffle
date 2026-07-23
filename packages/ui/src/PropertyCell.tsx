@@ -72,15 +72,27 @@ export interface PropertyCellProps {
   options?: string[];
   editable: boolean;
   editing: boolean;
-  onStartEdit: () => void;
-  onCommit: (value: PropertyValue | null) => void;
+  /** Printable-key editing replaces the current value with this first character. */
+  replacement?: string;
+  onCommit: (value: PropertyValue | null, move?: 'down' | 'left' | 'right') => void;
   onCancel: () => void;
 }
 
 const cellText: CSSProperties = { whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' };
 
-export function PropertyCell({ value, kind, currency, options, editable, editing, onStartEdit, onCommit, onCancel }: PropertyCellProps) {
-  if (editing) return <CellEditor kind={kind} currency={currency} options={options} initial={editorInitial(value)} onCommit={onCommit} onCancel={onCancel} />;
+export function PropertyCell({ value, kind, currency, options, editable, editing, replacement, onCommit, onCancel }: PropertyCellProps) {
+  if (editing) {
+    return (
+      <CellEditor
+        kind={kind}
+        currency={currency}
+        options={options}
+        initial={replacement ?? editorInitial(value)}
+        onCommit={onCommit}
+        onCancel={onCancel}
+      />
+    );
+  }
 
   if (kind === 'checkbox') {
     const checked = value?.kind === 'checkbox' && value.value;
@@ -89,8 +101,10 @@ export function PropertyCell({ value, kind, currency, options, editable, editing
         type="checkbox"
         checked={checked}
         disabled={!editable}
-        onChange={() => onCommit({ kind: 'checkbox', value: !checked })}
-        style={{ accentColor: 'var(--accent)', cursor: editable ? 'pointer' : 'default' }}
+        readOnly
+        tabIndex={-1}
+        aria-hidden
+        style={{ accentColor: 'var(--accent)', pointerEvents: 'none' }}
       />
     );
   }
@@ -100,18 +114,17 @@ export function PropertyCell({ value, kind, currency, options, editable, editing
   return (
     // alignSelf stretch: an empty cell must still be a full-height click target.
     <div
-      onClick={canEdit ? onStartEdit : undefined}
       title={canEdit ? undefined : empty ? undefined : formatProperty(value)}
-      style={{ display: 'flex', alignItems: 'center', alignSelf: 'stretch', width: '100%', minWidth: 0, cursor: canEdit ? 'text' : 'default', color: empty ? 'var(--text-dim)' : 'var(--text)' }}
+      style={{ display: 'flex', alignItems: 'center', alignSelf: 'stretch', width: '100%', minWidth: 0, color: empty ? 'var(--text-dim)' : 'var(--text)' }}
     >
       {empty ? (canEdit ? '' : '—') : kind === 'select' ? (
         <span style={{ ...cellText, background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: 999, padding: '0.1rem 0.55rem', fontSize: '0.78rem' }}>
           {formatProperty(value)}
         </span>
       ) : kind === 'url' ? (
-        <a href={value.kind === 'url' ? value.value : '#'} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()} style={{ ...cellText, minWidth: 0, color: 'var(--accent-ink)' }}>
+        <span style={{ ...cellText, minWidth: 0, color: 'var(--accent-ink)' }}>
           {formatProperty(value)}
-        </a>
+        </span>
       ) : (
         <span style={cellText}>{formatProperty(value)}</span>
       )}
@@ -124,16 +137,16 @@ function CellEditor({ kind, currency, options, initial, onCommit, onCancel }: {
   currency: string;
   options?: string[];
   initial: string;
-  onCommit: (value: PropertyValue | null) => void;
+  onCommit: (value: PropertyValue | null, move?: 'down' | 'left' | 'right') => void;
   onCancel: () => void;
 }) {
   const [raw, setRaw] = useState(initial);
   // Escape must cancel, but blur fires after — route both through one gate.
   const done = useRef(false);
-  const finish = (commit: boolean): void => {
+  const finish = (commit: boolean, move?: 'down' | 'left' | 'right'): void => {
     if (done.current) return;
     done.current = true;
-    if (commit) onCommit(parseCellInput(kind, raw, currency));
+    if (commit) onCommit(parseCellInput(kind, raw, currency), move);
     else onCancel();
   };
   const id = useRef(`dl-${Math.random().toString(36).slice(2, 8)}`); // stable per edit session
@@ -147,10 +160,23 @@ function CellEditor({ kind, currency, options, initial, onCommit, onCancel }: {
         list={listId}
         value={raw}
         onChange={(e) => setRaw(e.target.value)}
+        onClick={(e) => e.stopPropagation()}
+        onDoubleClick={(e) => e.stopPropagation()}
         onBlur={() => finish(true)}
         onKeyDown={(e) => {
-          if (e.key === 'Enter') finish(true);
-          if (e.key === 'Escape') finish(false);
+          if (e.key === 'Enter') {
+            e.preventDefault();
+            e.stopPropagation();
+            finish(true, 'down');
+          } else if (e.key === 'Tab') {
+            e.preventDefault();
+            e.stopPropagation();
+            finish(true, e.shiftKey ? 'left' : 'right');
+          } else if (e.key === 'Escape') {
+            e.preventDefault();
+            e.stopPropagation();
+            finish(false);
+          }
         }}
         style={{
           width: '100%',
