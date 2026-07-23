@@ -1,5 +1,15 @@
 export * from './icons';
-export type { GroupSection, LibraryItem, TableViewConfig, ThumbLoader } from './types';
+export {
+  TABLE_COLUMN_DEFAULT_WIDTH,
+  TABLE_COLUMN_MAX_WIDTH,
+  TABLE_COLUMN_MIN_WIDTH,
+  normalizeTableColumnWidth,
+  type GroupSection,
+  type LibraryItem,
+  type TableColumnConfig,
+  type TableViewConfig,
+  type ThumbLoader,
+} from './types';
 export { PropertyTable, TITLE_SORT_KEY, type PropertyTableProps, type TableColumn, type TableRowData } from './PropertyTable';
 export type { TableGridCell } from './tableGridState';
 export { PropertyCell, formatProperty, parseCellInput, EDITABLE_KINDS, type CellInputParseResult } from './PropertyCell';

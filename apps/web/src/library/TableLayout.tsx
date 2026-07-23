@@ -9,8 +9,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { loadPropertyTypes, propertyToYaml, rescanFile, savePropertyTypes, updateFrontmatter, type PropertyTypes, type PropertyValue } from '@waffle/core';
 import {
-  EDITABLE_KINDS, PropertyTable, TableIcon, TITLE_SORT_KEY, parseCellInput, registerLayout,
-  type CellInputParseResult, type LayoutProps, type TableColumn, type TableGridCell, type TableRowData,
+  EDITABLE_KINDS, PropertyTable, TABLE_COLUMN_DEFAULT_WIDTH, TableIcon, TITLE_SORT_KEY, parseCellInput, registerLayout,
+  type CellInputParseResult, type LayoutProps, type TableColumn, type TableColumnConfig, type TableGridCell, type TableRowData,
 } from '@waffle/ui';
 import { getVaultFs, platform } from '../platform/instance';
 import { createNote } from './addFlows';
@@ -43,6 +43,10 @@ function pasteCellValue(kind: PropertyValue['kind'], raw: string, currency: stri
       : { ok: false, message: 'Use true, false, yes, no, 1, or 0.' };
   }
   return parseCellInput(kind, s, currency);
+}
+
+function samePropertyValue(left: PropertyValue | null | undefined, right: PropertyValue | null): boolean {
+  return JSON.stringify(left ?? null) === JSON.stringify(right);
 }
 
 function TableLayout({ items, groups, folderId = null, onOpen, onMutated, tableConfig, onTableConfig }: LayoutProps) {
@@ -98,14 +102,15 @@ function TableLayout({ items, groups, folderId = null, onOpen, onMutated, tableC
       }
     }
     const dataKeys = [...present.keys()].sort();
-    const pinned = tableConfig?.columns ?? [];
-    const ordered = [...pinned, ...dataKeys.filter((k) => !pinned.includes(k))];
+    const configured = tableConfig?.columns ?? [];
+    const configuredByKey = new Map(configured.map((column) => [column.key, column]));
+    const ordered = [...configured.map((column) => column.key), ...dataKeys.filter((key) => !configuredByKey.has(key))];
     return ordered.map((key) => {
       const declared = types[key]?.kind;
       const counted = present.get(key);
       const modal = counted ? [...counted.entries()].sort((a, b) => b[1] - a[1])[0]![0] : undefined;
       const kind = (declared ?? modal ?? 'text') as PropertyValue['kind'];
-      const column: TableColumn = { key, kind };
+      const column: TableColumn = { key, kind, width: configuredByKey.get(key)?.width ?? TABLE_COLUMN_DEFAULT_WIDTH };
       const currency = types[key]?.currency ?? currencies.get(key);
       if (currency) column.currency = currency;
       const options = optionSets.get(key);
@@ -254,6 +259,45 @@ function TableLayout({ items, groups, folderId = null, onOpen, onMutated, tableC
     });
   };
 
+  const onFillDown = (cellRows: TableGridCell[][]): void => {
+    if (cellRows.length < 2) return;
+    const sourceRow = rowById.get(cellRows[0]?.[0]?.rowId ?? '');
+    if (!sourceRow) return;
+    const sourceValues = new Map<string, PropertyValue | null>();
+    for (const cell of cellRows[0] ?? []) {
+      const column = columns.find((candidate) => candidate.key === cell.columnKey);
+      if (!column || !EDITABLE_KINDS.includes(column.kind)) continue;
+      sourceValues.set(cell.columnKey, sourceRow.props[cell.columnKey] ?? null);
+    }
+    if (sourceValues.size === 0) return;
+
+    const patches = new Map<string, Record<string, PropertyValue | null>>();
+    for (const cells of cellRows.slice(1)) {
+      const target = rowById.get(cells[0]?.rowId ?? '');
+      if (!target?.editable || !target.item.contentRef) continue;
+      const patch: Record<string, PropertyValue | null> = {};
+      for (const cell of cells) {
+        if (!sourceValues.has(cell.columnKey)) continue;
+        const value = sourceValues.get(cell.columnKey) ?? null;
+        if (!samePropertyValue(target.props[cell.columnKey], value)) patch[cell.columnKey] = value;
+      }
+      if (Object.keys(patch).length > 0) patches.set(target.item.id, patch);
+    }
+    if (patches.size === 0) return;
+    patchOptimistically(patches);
+    void run(async () => {
+      const fs = await getVaultFs();
+      for (const [id, patch] of patches) {
+        const path = rowById.get(id)?.item.contentRef;
+        if (path) await writeNoteProperties(fs, path, patch);
+      }
+    });
+  };
+
+  const onColumnsChange = (next: TableColumnConfig[]): void => {
+    onTableConfig?.({ columns: next });
+  };
+
   /** Selected-cell paste overwrites existing note rows, then creates overflow notes. */
   const onPasteCells = (anchor: TableGridCell, grid: string[][]): void => {
     if (grid.length === 0) return;
@@ -349,7 +393,12 @@ function TableLayout({ items, groups, folderId = null, onOpen, onMutated, tableC
         nextTypes = { ...types, ...added };
         await savePropertyTypes(fs, nextTypes);
         setTypes(nextTypes);
-        onTableConfig?.({ columns: [...columns.map((c) => c.key), ...Object.keys(added)] });
+        onTableConfig?.({
+          columns: [
+            ...columns.map(({ key, width }) => ({ key, width })),
+            ...Object.keys(added).map((key) => ({ key, width: TABLE_COLUMN_DEFAULT_WIDTH })),
+          ],
+        });
       }
 
       const invalid: string[] = [];
@@ -386,7 +435,9 @@ function TableLayout({ items, groups, folderId = null, onOpen, onMutated, tableC
       const next = { ...types, [key]: decl };
       await savePropertyTypes(fs, next);
       setTypes(next);
-      onTableConfig?.({ columns: [...columns.map((c) => c.key), key] });
+      onTableConfig?.({
+        columns: [...columns.map(({ key: columnKey, width }) => ({ key: columnKey, width })), { key, width: TABLE_COLUMN_DEFAULT_WIDTH }],
+      });
       setAddOpen(false);
     });
   };
@@ -506,6 +557,8 @@ function TableLayout({ items, groups, folderId = null, onOpen, onMutated, tableC
           onEditCell={onEditCell}
           onClearCells={onClearCells}
           onPasteCells={dir !== null ? onPasteCells : undefined}
+          onFillDown={onFillDown}
+          onColumnsChange={onColumnsChange}
           canCreate={dir !== null}
           onCreateRow={onCreateRow}
           onPasteRows={dir !== null ? onPasteRows : undefined}

@@ -3,7 +3,14 @@
  * language, no ORM). Every function returns presentation-ready shapes.
  */
 import { fromEavColumns, type FilterNode, type PropertyValue } from '@waffle/core';
-import { formatProperty, type GroupSection, type LibraryItem } from '@waffle/ui';
+import {
+  TABLE_COLUMN_DEFAULT_WIDTH,
+  formatProperty,
+  normalizeTableColumnWidth,
+  type GroupSection,
+  type LibraryItem,
+  type TableColumnConfig,
+} from '@waffle/ui';
 import { platform } from '../platform/instance';
 
 export interface FolderNode {
@@ -62,8 +69,8 @@ export interface ViewCfg {
   /** Flat AND of cmp nodes in v1 UI; stored as the core FilterNode for forward-compat. */
   filters: FilterNode | null;
   groupBy: string | null;
-  /** Table layout: column order; data keys not listed append at render time. */
-  columns?: string[];
+  /** Table layout: property-column order + width; data keys not listed append at render time. */
+  columns?: TableColumnConfig[];
   /**
    * Set on views derived from an Obsidian `.base`: which base+view produced it
    * and the exact spec last imported. While the view still matches `spec` it is
@@ -84,17 +91,67 @@ export interface FolderView {
 
 const DEFAULT_CFG: ViewCfg = { sort: { key: '$updated', dir: 'desc' }, filters: null, groupBy: null };
 
-/** Configs written before the view manager stored sort as 'updated'|'title' + a separate colSort. */
+/** `string[]` is the pre-Slice-B shape; normalize without eagerly rewriting stored config. */
+function normalizeColumns(value: unknown): TableColumnConfig[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const seen = new Set<string>();
+  const columns: TableColumnConfig[] = [];
+  for (const entry of value) {
+    const key =
+      typeof entry === 'string'
+        ? entry
+        : entry && typeof entry === 'object' && typeof (entry as { key?: unknown }).key === 'string'
+          ? (entry as { key: string }).key
+          : '';
+    if (!key || key.startsWith('$') || seen.has(key)) continue;
+    seen.add(key);
+    const width =
+      entry && typeof entry === 'object'
+        ? normalizeTableColumnWidth((entry as { width?: unknown }).width)
+        : TABLE_COLUMN_DEFAULT_WIDTH;
+    columns.push({ key, width });
+  }
+  return columns;
+}
+
+/**
+ * Old derived views embed their pre-Slice-B columns in `origin.spec`. Migrate
+ * that snapshot with the live cfg or an untouched view would look divergent.
+ */
+function normalizeOriginSpec(spec: string): string {
+  try {
+    const raw = JSON.parse(spec) as { layout?: unknown; sort?: unknown; filters?: unknown; columns?: unknown };
+    if (!Array.isArray(raw.columns)) return spec;
+    return JSON.stringify({
+      layout: raw.layout,
+      sort: raw.sort,
+      filters: raw.filters,
+      columns: normalizeColumns(raw.columns) ?? null,
+    });
+  } catch {
+    return spec;
+  }
+}
+
+/** Configs written before the view manager and Slice B are silently normalized here. */
 function parseCfg(json: string): ViewCfg {
-  const raw = JSON.parse(json) as { sort?: ViewSort | 'updated' | 'title'; colSort?: ViewSort | null; filters?: FilterNode | null; groupBy?: string | null; columns?: string[]; origin?: ViewCfg['origin'] };
+  const raw = JSON.parse(json) as {
+    sort?: ViewSort | 'updated' | 'title';
+    colSort?: ViewSort | null;
+    filters?: FilterNode | null;
+    groupBy?: string | null;
+    columns?: unknown;
+    origin?: ViewCfg['origin'];
+  };
   let sort: ViewSort =
     raw.sort === 'title' ? { key: '$title', dir: 'asc' }
     : raw.sort && typeof raw.sort === 'object' ? raw.sort
     : { key: '$updated', dir: 'desc' };
   if (raw.colSort) sort = raw.colSort;
   const cfg: ViewCfg = { sort, filters: raw.filters ?? null, groupBy: raw.groupBy ?? null };
-  if (raw.columns) cfg.columns = raw.columns;
-  if (raw.origin) cfg.origin = raw.origin;
+  const columns = normalizeColumns(raw.columns);
+  if (columns) cfg.columns = columns;
+  if (raw.origin) cfg.origin = { ...raw.origin, spec: normalizeOriginSpec(raw.origin.spec) };
   return cfg;
 }
 

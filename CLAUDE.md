@@ -98,31 +98,40 @@ newer optimistic patch; and the grid exposes stable active-descendant,
 row/column/value/edit, and full-range selection semantics. The executable
 acceptance contract records the adversarial cases that exposed these defects.
 
+**Slice B complete:** property-column widths and drag order persist together
+in the view config, legacy `string[]` configs and derived-view ownership
+snapshots migrate silently, Obsidian `order` + `columnSize` round-trip without
+clobbering unknown sizes, Title remains fixed during horizontal scroll, and
+Cmd/Ctrl+D fills rectangular selections through the file-first row-batched
+write loop.
+
 **Next, in agreed order:**
 
-1. **Table interaction slice B** — column resize + drag-reorder (persist
-   widths in view config, evolving `columns: string[]` →
-   `{key, width}[]` with silent migration), sticky Title column, fill-down.
-2. **Slice C** — session undo/redo (inverse patches over property writes;
-   deletes un-trash by stored path).
-3. **P1 remainder**: status/ratings surfacing in library views (chips +
+1. **Obsidian list-property compatibility** — make YAML sequence values safe
+   before making them editable: no array may be coerced to a scalar, then add
+   the Waffle representation for Obsidian `multitext` properties.
+2. **Bases compatibility parity** — import current `groupBy` and list views,
+   NOT/negated filters, and the common `file.*` fields Waffle can represent;
+   unsupported constructs continue to report/freeze rather than degrade.
+3. **Table interaction slice C** — session undo/redo (inverse patches over
+   property writes; deletes un-trash by stored path).
+4. **P1 remainder**: status/ratings surfacing in library views (chips +
    interaction filters), theme palette editor, Supabase auth, Capacitor shell
    (share extension), Tauri shell (native FS watching — replaces the
    per-write-site rescans with a real watcher), on-device Whisper.
-4. **P2 sharing opens with two distinct surfaces**: collaborative invite links
+5. **P2 sharing opens with two distinct surfaces**: collaborative invite links
    and unlisted public publishing for a single topping or folder. Public links
    are revocable, read-only projections with stable, crawler-fetchable
    Open Graph/Twitter Card images for WhatsApp and equivalent unfurlers. The
    engineering contract and pre-implementation ADR gate are in `docs/04`.
 
-Known deferred gaps (each states its owner): list property kind (Obsidian
-`multitext` skips until it exists), filter NOT/negation (skipped on import),
-link/file properties (`.waffle/meta.json`, ADR-013), restore-from-trash UI,
-vault switcher (single active vault is documented v1 behavior), manual
-acceptance specs for the remaining quarantine modules (the table contract now
-lives at `docs/recipes/verify-table-interactions.md`; write the others as
-recipes/headers when next touching each module), and simplification of the
-three large orchestrators (Library / TableLayout / PropertyTable) once their
+Known deferred gaps (each states its owner): link/file properties
+(`.waffle/meta.json`, ADR-013), restore-from-trash UI, vault switcher (single
+active vault is documented v1 behavior), manual acceptance specs for the
+remaining quarantine modules (the table contract now lives at
+`docs/recipes/verify-table-interactions.md`; write the others as recipes/headers
+when next touching each module), and simplification of the three large
+orchestrators (Library / TableLayout / PropertyTable) once their
 responsibilities stop fitting a short explanation — audit corrective #6,
 deliberately last.
 

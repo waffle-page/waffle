@@ -3,20 +3,22 @@
  * Waffle patches its `.base` view node — the frontmatter discipline applied to
  * bases. Rules that keep user files safe:
  *  - YAML document surgery: only the keys we own (name/type/filters/order/
- *    sort) are set; formulas, columnSize, limit, and anything unknown are
- *    never touched (comments and formatting preserved by the yaml Document).
+ *    sort plus widths for ordered properties) are set. Unknown `columnSize`
+ *    entries, formulas, limit, and unknown keys survive; comments and
+ *    formatting are preserved by the yaml Document.
  *  - Base-level filter children (merged into the view at import) are
  *    SUBTRACTED structurally before writing; if the user's edit altered those
  *    shared conditions the state is inexpressible per-view → we FREEZE
  *    (return 'frozen', write nothing) rather than corrupt the file.
- *  - Inexpressible layouts (masonry/list — Bases has table/cards only) also
- *    freeze; groupBy never reaches this code (Waffle-side field, docs in
- *    obsidianImport.specOf).
+ *  - Layouts outside the implemented sync subset (masonry and, pending the
+ *    compatibility slice, list) also freeze; groupBy never reaches this code
+ *    yet (Waffle-side field, docs in obsidianImport.specOf).
  *  - Anti-flap: after writing we re-derive the view from the new file and
  *    store THAT canonical state + spec, so the next sync sees perfect equality.
  */
 import { parseDocument } from 'yaml';
 import { rescanFile, type FilterNode, type PropertyTypes, type VaultFs, loadPropertyTypes } from '@waffle/core';
+import { normalizeTableColumnWidth } from '@waffle/ui';
 import { platform } from '../platform/instance';
 import { saveViewState, type FolderView, type ViewCfg } from '../library/queries';
 import { reimportView, specOf } from './obsidianImport';
@@ -32,7 +34,7 @@ export async function writeBackView(fs: VaultFs, view: FolderView): Promise<Writ
   if (!origin) return 'synced'; // not derived — nothing to do
 
   const type = LAYOUT_TO_TYPE[view.layout];
-  if (!type) return 'frozen'; // masonry/list have no Bases spelling
+  if (!type) return 'frozen'; // outside the currently implemented Bases subset
 
   const current = await reimportView(fs, origin.base, origin.view);
   if (!current) return 'frozen'; // base or view node vanished under us
@@ -56,16 +58,30 @@ export async function writeBackView(fs: VaultFs, view: FolderView): Promise<Writ
   const text = new TextDecoder().decode(await fs.read(origin.base));
   const doc = parseDocument(text);
   if (doc.errors.length > 0) return 'frozen';
-  const views = doc.toJS() as { views?: Array<{ name?: string }> };
+  const views = doc.toJS() as { views?: Array<{ name?: string; columnSize?: unknown }> };
   const index = (views.views ?? []).findIndex((v) => (v.name?.trim() || 'Imported view') === origin.view);
   if (index < 0) return 'frozen';
+  const rawColumnSize = views.views?.[index]?.columnSize;
+  if (
+    view.cfg.columns?.length &&
+    rawColumnSize !== undefined &&
+    (rawColumnSize === null || typeof rawColumnSize !== 'object' || Array.isArray(rawColumnSize))
+  ) {
+    return 'frozen'; // malformed user-owned structure: never coerce or replace it
+  }
 
   doc.setIn(['views', index, 'type'], type);
   doc.setIn(['views', index, 'name'], view.name);
   if (exprs.length > 0) doc.setIn(['views', index, 'filters'], { and: exprs });
   else doc.deleteIn(['views', index, 'filters']);
-  if (view.cfg.columns?.length) doc.setIn(['views', index, 'order'], ['file.name', ...view.cfg.columns]);
-  else doc.deleteIn(['views', index, 'order']);
+  if (view.cfg.columns?.length) {
+    doc.setIn(['views', index, 'order'], ['file.name', ...view.cfg.columns.map((column) => column.key)]);
+    const columnSize = { ...((rawColumnSize as Record<string, unknown> | undefined) ?? {}) };
+    for (const column of view.cfg.columns) columnSize[`note.${column.key}`] = normalizeTableColumnWidth(column.width);
+    doc.setIn(['views', index, 'columnSize'], columnSize);
+  } else {
+    doc.deleteIn(['views', index, 'order']);
+  }
   doc.setIn(['views', index, 'sort'], [{ property: sortKeyToBases(view.cfg.sort.key), direction: view.cfg.sort.dir === 'desc' ? 'DESC' : 'ASC' }]);
 
   await fs.write(origin.base, new TextEncoder().encode(doc.toString()));

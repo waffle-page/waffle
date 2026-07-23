@@ -24,10 +24,25 @@ export interface GroupSection {
   count: number;
 }
 
+export const TABLE_COLUMN_DEFAULT_WIDTH = 160;
+export const TABLE_COLUMN_MIN_WIDTH = 80;
+export const TABLE_COLUMN_MAX_WIDTH = 640;
+
+export function normalizeTableColumnWidth(value: unknown): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return TABLE_COLUMN_DEFAULT_WIDTH;
+  return Math.round(Math.min(TABLE_COLUMN_MAX_WIDTH, Math.max(TABLE_COLUMN_MIN_WIDTH, value)));
+}
+
+/** Persisted property-column presentation; Title is built-in and fixed-width. */
+export interface TableColumnConfig {
+  key: string;
+  width: number;
+}
+
 /** Table-layout slice of a view's persisted config (docs/12). */
 export interface TableViewConfig {
-  /** Column order; data keys not listed append at render time. */
-  columns?: string[];
+  /** Property-column order + width; data keys not listed append at the default width. */
+  columns?: TableColumnConfig[];
   /** The VIEW's sort ($updated/$title/property key) — the table renders carets and patches it on header click. */
   sort?: { key: string; dir: 'asc' | 'desc' } | null;
   /** Property key whose values become section headers. */

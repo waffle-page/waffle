@@ -26,12 +26,21 @@ Then verify the loop live: put the construct in the fixture `Recetas.base`,
 scan, edit that view in Waffle, reload — the construct must survive both
 crossings unchanged.
 
-## Adding a synced view field (today: name/type/filters/order/sort)
+## Adding a synced view field (today: name/type/filters/order/sort/columnSize)
 
 Extend `specOf` (it defines the sync contract), `planViewImport` (import),
 and the `doc.setIn` block in `writeBackView` (export). Anything in `specOf`
 marks divergence when edited — so a field belongs there ONLY if write-back
 can express it.
+
+Column order and widths form one Waffle field:
+`columns: Array<{key, width}>`. Bases splits that into `order` plus
+`columnSize`; its `file.name` is Waffle's fixed Title column and is not put in
+the Waffle array. Width import accepts the Bases `note.<key>` spelling, while
+write-back updates only those ordered note-property entries and preserves
+unknown `columnSize` keys. Pre-Slice-B `string[]` configs and their embedded
+`origin.spec` snapshots normalize together in `queries.parseCfg`; changing
+only one would falsely classify an untouched derived view as diverged.
 
 ## Adding a Waffle-side field (like groupBy)
 

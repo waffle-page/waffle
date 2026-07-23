@@ -14,6 +14,7 @@
  */
 import { parse as parseYaml } from 'yaml';
 import { loadPropertyTypes, savePropertyTypes, type PropertyTypeDecl, type PropertyTypes, type SqlDriver, type VaultFs, type FilterNode } from '@waffle/core';
+import { normalizeTableColumnWidth } from '@waffle/ui';
 import { createView, deleteView, listViews, saveViewState, type FolderView, type ViewCfg } from '../library/queries';
 
 const OBSIDIAN_KIND: Record<string, PropertyTypeDecl['kind'] | undefined> = {
@@ -231,20 +232,21 @@ function planViewImport(v: BaseView, baseFilter: FilterNode | null, kinds: Prope
   const layout = v.type === 'table' ? 'table' : v.type === 'cards' ? 'grid' : 'masonry';
   if (v.type && v.type !== 'table' && v.type !== 'cards') notes.push(`view type "${v.type}" → masonry`);
   if (v.limit) notes.push(`limit ${v.limit} ignored (views are unbounded here)`);
-  if (v.columnSize) notes.push('columnSize ignored (column widths arrive with table slice B)');
 
   const own = parseFilterBlock(v.filters, kinds, notes);
   const children = [...(baseFilter?.op === 'and' ? baseFilter.children : baseFilter ? [baseFilter] : []), ...(own?.op === 'and' ? own.children : own ? [own] : [])];
   const filters: FilterNode | null = children.length ? { op: 'and', children } : null;
 
-  const columns = (v.order ?? []).filter((key) => {
-    if (key === 'file.name') return false; // the built-in title column
-    if (key.startsWith('file.')) {
-      notes.push(`column ${key} skipped (no such built-in yet)`);
-      return false;
+  const columns = (v.order ?? []).flatMap((rawKey) => {
+    if (rawKey === 'file.name') return []; // the built-in fixed-width title column
+    if (rawKey.startsWith('file.')) {
+      notes.push(`column ${rawKey} skipped (no such built-in yet)`);
+      return [];
     }
-    return true;
-  }).map(stripNote);
+    const key = stripNote(rawKey);
+    const width = normalizeTableColumnWidth(v.columnSize?.[`note.${key}`] ?? v.columnSize?.[rawKey] ?? v.columnSize?.[key]);
+    return [{ key, width }];
+  });
 
   let sort: ViewCfg['sort'] = { key: '$updated', dir: 'desc' };
   const first = v.sort?.[0];

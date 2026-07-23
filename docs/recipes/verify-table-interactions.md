@@ -77,6 +77,7 @@ not silently turn it into a frontmatter edit.
 | Printable character | Begin replacement editing with that character |
 | Space on checkbox | Toggle once without opening an editor |
 | Delete / Backspace | Clear editable property cells in the selected range |
+| Cmd+D / Ctrl+D | Fill each selected column's top value down through lower selected note rows |
 | Escape | Clear the cell selection |
 | Copy | Put the selected rectangle on the clipboard as TSV |
 | Paste | Use the active cell as the top-left anchor |
@@ -148,6 +149,31 @@ This is the pre-Slice-A spreadsheet append flow and remains supported:
 - New column kinds infer only when all non-empty values agree; otherwise text.
 - Every new note is created with complete frontmatter in one write and rescanned.
 
+## Column presentation contract
+
+- Persisted property columns use `{key, width}[]`; pre-Slice-B `string[]`
+  configs silently acquire the default width without an eager database write.
+- The same migration applies inside an Obsidian-derived view's `origin.spec`,
+  so migration alone cannot mark the view as user-diverged.
+- Pointer resize previews locally and persists once on release. The resize
+  separator also supports Left/Right in 16-pixel steps.
+- Drag-reorder persists the complete property-column order and current widths.
+  Title remains first, fixed-width, and non-draggable.
+- The row-selection control and Title stay visible during horizontal scroll;
+  property columns scroll beneath them.
+- Bases `order` + `columnSize` round-trip to the same Waffle column config.
+  Write-back preserves unrelated `columnSize` entries.
+
+## Fill-down contract
+
+- A rectangular selection of two or more rows is required. For every selected
+  editable property column, the top row is the source.
+- A missing source value clears that property below, matching spreadsheet
+  semantics. Title and read-only property kinds are ignored.
+- Read-only target rows are consumed but unchanged. Each affected note gets
+  one composed file write, one targeted rescan, and canonical requery.
+- No-op targets are skipped.
+
 ## Manual procedure
 
 ### 1. Setup
@@ -214,7 +240,31 @@ Record the commit, browser, spreadsheet application, and fixture topping count.
   not report idle while a write is pending or let an older failure roll back a
   newer successful optimistic patch.
 
-### 7. Regression surfaces
+### 7. Column resize, reorder, sticky Title, and migration
+
+- Resize two property columns with the pointer, then use Left/Right on a resize
+  separator. Switch views and reload; confirm both widths survive.
+- Drag the second property before the first. Switch views and reload; confirm
+  order and widths survive together and sorting did not change during drag.
+- Horizontally scroll a wide table. Confirm row selectors and Title remain
+  fixed while property columns pass beneath them.
+- In the fixture-derived **Mejores recetas** view, confirm the `.base`
+  `columnSize` widths render. Resize/reorder, reload, and rescan; confirm the
+  derived view neither freezes nor flaps and `file.name` sizing survives.
+- Open a pre-Slice-B saved view when available; confirm its columns render at
+  the default width and its derived ownership state remains intact.
+
+### 8. Fill-down
+
+- Select at least a 3×2 range with different top-row values and press Cmd+D
+  (Ctrl+D on non-macOS). Reload; confirm both columns copied downward.
+- Repeat with a blank top cell; confirm only that property clears below.
+- Include Title, a read-only kind, and a read-only topping row. Confirm they
+  remain unchanged while editable note-property targets fill.
+- Inspect the affected note frontmatter and busy state: one write per target
+  row, no intermediate stale reconciliation.
+
+### 9. Regression surfaces
 
 - Bulk-edit at least two selected note rows.
 - Paste-append with no active cell, including header-based column inference.
@@ -222,7 +272,7 @@ Record the commit, browser, spreadsheet application, and fixture topping count.
 - Sort and group; confirm cell selection reconciles safely.
 - Delete a row through the bulk-selection flow and confirm `.trash/` semantics.
 
-### 8. Twenty-thousand-row virtualization
+### 10. Twenty-thousand-row virtualization
 
 1. In `?dev`, select **Seed 20,000 toppings**.
 2. Return to the Table layout.
@@ -233,7 +283,7 @@ Record the commit, browser, spreadsheet application, and fixture topping count.
    survives.
 6. Clear seed data and rescan the fixture when finished.
 
-### 9. Accessibility
+### 11. Accessibility
 
 - Reach the grid and every operation above using the keyboard alone.
 - Confirm the active cell has a visible focus indicator.
@@ -260,4 +310,6 @@ Table acceptance:
 - Invalid input + rapid same-note writes: PASS|FAIL
 - 20k virtualization/editor pinning: PASS|FAIL
 - Keyboard/screen-reader semantics: PASS|FAIL
+- Resize/reorder/sticky/migration: PASS|FAIL
+- Fill-down + row-batched writes: PASS|FAIL
 ```

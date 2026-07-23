@@ -5,10 +5,31 @@
  * state delegated to the quarantined tableGridState.ts state machine.
  * Executable contract: docs/recipes/verify-table-interactions.md.
  */
-import { useCallback, useEffect, useId, useMemo, useReducer, useRef, useState, type CSSProperties, type ClipboardEvent, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useMemo,
+  useReducer,
+  useRef,
+  useState,
+  type CSSProperties,
+  type ClipboardEvent,
+  type KeyboardEvent,
+  type MouseEvent,
+  type PointerEvent as ReactPointerEvent,
+  type ReactNode,
+} from 'react';
 import { defaultRangeExtractor, useVirtualizer, type Range } from '@tanstack/react-virtual';
 import type { PropertyValue } from '@waffle/core';
-import type { GroupSection, LibraryItem } from './types';
+import {
+  TABLE_COLUMN_MAX_WIDTH,
+  TABLE_COLUMN_MIN_WIDTH,
+  normalizeTableColumnWidth,
+  type GroupSection,
+  type LibraryItem,
+  type TableColumnConfig,
+} from './types';
 import { EDITABLE_KINDS, formatProperty, PropertyCell } from './PropertyCell';
 import {
   EMPTY_TABLE_GRID_STATE,
@@ -23,8 +44,7 @@ import {
 import { isOpenable } from './ToppingCard';
 import { DashIcon, FileIcon, LinkIcon, NoteIcon, PlusIcon } from './icons';
 
-export interface TableColumn {
-  key: string;
+export interface TableColumn extends TableColumnConfig {
   kind: PropertyValue['kind'];
   /** money columns: ISO 4217 for new values. */
   currency?: string;
@@ -56,8 +76,12 @@ export interface PropertyTableProps {
   onClearCells?: (cells: TableGridCell[]) => void;
   /** Paste a TSV rectangle at the active cell. */
   onPasteCells?: (anchor: TableGridCell, rows: string[][]) => void;
+  /** Copy each selected column's top cell through the lower selected note rows. */
+  onFillDown?: (cells: TableGridCell[][]) => void;
   /** Spreadsheet paste with no active cell appends rows and may infer columns. */
   onPasteRows?: (rows: string[][]) => void;
+  /** Persist the rendered property-column order and widths as one view-config patch. */
+  onColumnsChange?: (columns: TableColumnConfig[]) => void;
   /** false ⇒ no ghost row (folder has no vault directory to create files in). */
   canCreate: boolean;
   onCreateRow: (title: string) => void;
@@ -71,7 +95,6 @@ export const TITLE_SORT_KEY = '$title';
 const ROW_H = 36;
 const W_CHECK = 36;
 const W_TITLE = 280;
-const W_PROP = 160;
 const W_ADD = 44;
 
 const TYPE_ICON = { note: NoteIcon, link: LinkIcon, file: FileIcon, dash: DashIcon } as const;
@@ -114,7 +137,9 @@ export function PropertyTable({
   onEditCell,
   onClearCells,
   onPasteCells,
+  onFillDown,
   onPasteRows,
+  onColumnsChange,
   canCreate,
   onCreateRow,
   onAddColumn,
@@ -124,6 +149,14 @@ export function PropertyTable({
   const gridDomId = useId();
   const [grid, dispatchGrid] = useReducer(tableGridReducer, EMPTY_TABLE_GRID_STATE);
   const [draft, setDraft] = useState('');
+  const [resizeDraft, setResizeDraft] = useState<{ key: string; width: number } | null>(null);
+  const [draggedKey, setDraggedKey] = useState<string | null>(null);
+  const [dropTarget, setDropTarget] = useState<{ key: string; edge: 'before' | 'after' } | null>(null);
+  const resizeSession = useRef<{ key: string; startX: number; startWidth: number; width: number } | null>(null);
+  const resizeCleanup = useRef<(() => void) | null>(null);
+  const columnDragCleanup = useRef<(() => void) | null>(null);
+  const dropTargetRef = useRef<{ key: string; edge: 'before' | 'after' } | null>(null);
+  const suppressHeaderClick = useRef(false);
 
   const rowIds = useMemo(() => rows.map((row) => row.item.id), [rows]);
   const columnKeys = useMemo(() => [TITLE_SORT_KEY, ...columns.map((column) => column.key)], [columns]);
@@ -131,6 +164,10 @@ export function PropertyTable({
   const rowById = useMemo(() => new Map(rows.map((row) => [row.item.id, row])), [rows]);
   const rowIndexById = useMemo(() => new Map(rows.map((row, index) => [row.item.id, index])), [rows]);
   const columnByKey = useMemo(() => new Map(columns.map((column) => [column.key, column])), [columns]);
+  const columnWidths = useMemo(
+    () => columns.map((column) => resizeDraft?.key === column.key ? resizeDraft.width : column.width),
+    [columns, resizeDraft],
+  );
 
   useEffect(() => {
     dispatchGrid({ type: 'reconcile', projection });
@@ -189,19 +226,21 @@ export function PropertyTable({
     const columnIndex = columnKeys.indexOf(activeCell.columnKey);
     const parent = parentRef.current;
     if (!parent || columnIndex < 0) return;
-    const left = columnIndex === 0 ? W_CHECK : W_CHECK + W_TITLE + (columnIndex - 1) * W_PROP;
-    const width = columnIndex === 0 ? W_TITLE : W_PROP;
-    if (left < parent.scrollLeft) parent.scrollLeft = left;
+    if (columnIndex === 0) return; // Title is sticky and therefore always visible.
+    const left = W_CHECK + W_TITLE + columnWidths.slice(0, columnIndex - 1).reduce((sum, width) => sum + width, 0);
+    const width = columnWidths[columnIndex - 1]!;
+    const stickyRight = parent.scrollLeft + W_CHECK + W_TITLE;
+    if (left < stickyRight) parent.scrollLeft = Math.max(0, left - W_CHECK - W_TITLE);
     else if (left + width > parent.scrollLeft + parent.clientWidth) {
       parent.scrollLeft = left + width - parent.clientWidth;
     }
-  }, [activeCell, columnKeys, entryIndexByRowId, virtualizer]);
+  }, [activeCell, columnKeys, columnWidths, entryIndexByRowId, virtualizer]);
 
   const selectedCells = useMemo(() => tableGridCells(grid.selection, projection), [grid.selection, projection]);
   const selectionRect = useMemo(() => tableGridSelectionRect(grid.selection, projection), [grid.selection, projection]);
 
-  const totalWidth = W_CHECK + W_TITLE + columns.length * W_PROP + W_ADD;
-  const gridTemplate = `${W_CHECK}px ${W_TITLE}px ${columns.map(() => `${W_PROP}px`).join(' ')} ${W_ADD}px`.trim();
+  const totalWidth = W_CHECK + W_TITLE + columnWidths.reduce((sum, width) => sum + width, 0) + W_ADD;
+  const gridTemplate = `${W_CHECK}px ${W_TITLE}px ${columnWidths.map((width) => `${width}px`).join(' ')} ${W_ADD}px`.trim();
   const selectableRows = rows.filter((row) => row.editable || row.deletable);
   const allSelected = selectableRows.length > 0 && selectableRows.every((row) => selected.has(row.item.id));
 
@@ -221,30 +260,225 @@ export function PropertyTable({
     height: '100%',
   };
 
-  const headerCell = (key: string, label: ReactNode, columnIndex: number, sortable: boolean): ReactNode => (
-    <div
-      key={key}
-      role="columnheader"
-      aria-colindex={columnIndex + 1}
-      aria-sort={sort?.key === key ? (sort.dir === 'asc' ? 'ascending' : 'descending') : 'none'}
-      onClick={sortable ? () => onSort(key) : undefined}
-      style={{
-        ...cellPad,
-        gap: 4,
-        cursor: sortable ? 'pointer' : 'default',
-        fontWeight: 600,
-        fontSize: '0.76rem',
-        color: 'var(--text-dim)',
-        whiteSpace: 'nowrap',
-        overflow: 'hidden',
-        textOverflow: 'ellipsis',
-        userSelect: 'none',
-      }}
-    >
-      {label}
-      {sort?.key === key && <span aria-hidden>{sort.dir === 'asc' ? '▲' : '▼'}</span>}
-    </div>
-  );
+  /**
+   * Column interaction invariants: Title never participates; pointer motion is
+   * draft-only; release/drop emits at most one complete config; window-scoped
+   * sessions survive the handle/header moving away from the original target.
+   */
+  const persistColumnWidth = (key: string, width: number): void => {
+    const normalized = normalizeTableColumnWidth(width);
+    if (columns.find((column) => column.key === key)?.width === normalized) return;
+    onColumnsChange?.(columns.map((column) => ({
+      key: column.key,
+      width: column.key === key ? normalized : column.width,
+    })));
+  };
+
+  const startColumnResize = (event: ReactPointerEvent<HTMLSpanElement>, column: TableColumn): void => {
+    if (!onColumnsChange) return;
+    event.preventDefault();
+    event.stopPropagation();
+    event.currentTarget.focus({ preventScroll: true });
+    const pointerId = event.pointerId;
+    resizeSession.current = {
+      key: column.key,
+      startX: event.clientX,
+      startWidth: column.width,
+      width: column.width,
+    };
+    setResizeDraft({ key: column.key, width: column.width });
+
+    const cleanup = (): void => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', finish);
+      window.removeEventListener('pointercancel', cancel);
+      resizeCleanup.current = null;
+    };
+    const move = (moveEvent: globalThis.PointerEvent): void => {
+      const session = resizeSession.current;
+      if (!session || moveEvent.pointerId !== pointerId) return;
+      moveEvent.preventDefault();
+      const width = normalizeTableColumnWidth(session.startWidth + moveEvent.clientX - session.startX);
+      session.width = width;
+      setResizeDraft({ key: session.key, width });
+    };
+    const finish = (finishEvent: globalThis.PointerEvent): void => {
+      const session = resizeSession.current;
+      if (!session || finishEvent.pointerId !== pointerId) return;
+      session.width = normalizeTableColumnWidth(session.startWidth + finishEvent.clientX - session.startX);
+      cleanup();
+      resizeSession.current = null;
+      setResizeDraft(null);
+      persistColumnWidth(session.key, session.width);
+    };
+    const cancel = (cancelEvent: globalThis.PointerEvent): void => {
+      if (cancelEvent.pointerId !== pointerId) return;
+      cleanup();
+      resizeSession.current = null;
+      setResizeDraft(null);
+    };
+    resizeCleanup.current?.();
+    resizeCleanup.current = cleanup;
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', finish);
+    window.addEventListener('pointercancel', cancel);
+  };
+
+  const dropColumn = (sourceKey: string, targetKey: string, edge: 'before' | 'after'): void => {
+    if (!onColumnsChange || sourceKey === targetKey) return;
+    const source = columns.find((column) => column.key === sourceKey);
+    if (!source) return;
+    const remaining = columns.filter((column) => column.key !== sourceKey);
+    const targetIndex = remaining.findIndex((column) => column.key === targetKey);
+    if (targetIndex < 0) return;
+    const insertAt = targetIndex + (edge === 'after' ? 1 : 0);
+    const reordered = [...remaining.slice(0, insertAt), source, ...remaining.slice(insertAt)];
+    if (reordered.every((column, index) => column.key === columns[index]?.key)) return;
+    onColumnsChange(reordered.map(({ key, width }) => ({ key, width })));
+  };
+
+  const startColumnDrag = (event: ReactPointerEvent<HTMLDivElement>, column: TableColumn): void => {
+    if (!onColumnsChange || event.button !== 0) return;
+    const pointerId = event.pointerId;
+    const startX = event.clientX;
+    const startY = event.clientY;
+    let dragging = false;
+
+    const cleanup = (): void => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', finish);
+      window.removeEventListener('pointercancel', cancel);
+      columnDragCleanup.current = null;
+    };
+    const targetAt = (clientX: number, clientY: number): { key: string; edge: 'before' | 'after' } | null => {
+      const element = document.elementFromPoint(clientX, clientY)?.closest<HTMLElement>('[data-table-column-key]');
+      const key = element?.dataset.tableColumnKey;
+      if (!element || !key || key === column.key) return null;
+      const rect = element.getBoundingClientRect();
+      return { key, edge: clientX < rect.left + rect.width / 2 ? 'before' : 'after' };
+    };
+    const move = (moveEvent: globalThis.PointerEvent): void => {
+      if (moveEvent.pointerId !== pointerId) return;
+      if (!dragging && Math.hypot(moveEvent.clientX - startX, moveEvent.clientY - startY) < 6) return;
+      moveEvent.preventDefault();
+      dragging = true;
+      setDraggedKey(column.key);
+      const target = targetAt(moveEvent.clientX, moveEvent.clientY);
+      dropTargetRef.current = target;
+      setDropTarget(target);
+    };
+    const finish = (finishEvent: globalThis.PointerEvent): void => {
+      if (finishEvent.pointerId !== pointerId) return;
+      cleanup();
+      if (dragging) {
+        finishEvent.preventDefault();
+        const target = dropTargetRef.current ?? targetAt(finishEvent.clientX, finishEvent.clientY);
+        if (target) dropColumn(column.key, target.key, target.edge);
+        suppressHeaderClick.current = true;
+        window.setTimeout(() => {
+          suppressHeaderClick.current = false;
+        }, 0);
+      }
+      dropTargetRef.current = null;
+      setDraggedKey(null);
+      setDropTarget(null);
+    };
+    const cancel = (cancelEvent: globalThis.PointerEvent): void => {
+      if (cancelEvent.pointerId !== pointerId) return;
+      cleanup();
+      dropTargetRef.current = null;
+      setDraggedKey(null);
+      setDropTarget(null);
+    };
+    columnDragCleanup.current?.();
+    columnDragCleanup.current = cleanup;
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', finish);
+    window.addEventListener('pointercancel', cancel);
+  };
+
+  useEffect(() => () => {
+    resizeCleanup.current?.();
+    columnDragCleanup.current?.();
+  }, []);
+
+  const headerCell = (key: string, label: ReactNode, columnIndex: number, column?: TableColumn): ReactNode => {
+    const draggable = !!column && !!onColumnsChange;
+    const isDropTarget = dropTarget?.key === key && draggedKey !== key;
+    return (
+      <div
+        key={key}
+        role="columnheader"
+        aria-colindex={columnIndex + 1}
+        aria-sort={sort?.key === key ? (sort.dir === 'asc' ? 'ascending' : 'descending') : 'none'}
+        data-table-column-key={column?.key}
+        onClick={() => {
+          if (suppressHeaderClick.current) return;
+          onSort(key);
+        }}
+        onPointerDown={column ? (event) => startColumnDrag(event, column) : undefined}
+        style={{
+          ...cellPad,
+          position: key === TITLE_SORT_KEY ? 'sticky' : 'relative',
+          left: key === TITLE_SORT_KEY ? W_CHECK : undefined,
+          zIndex: key === TITLE_SORT_KEY ? 3 : undefined,
+          background: key === TITLE_SORT_KEY ? 'var(--surface)' : undefined,
+          borderRight: key === TITLE_SORT_KEY ? '1px solid var(--border)' : undefined,
+          gap: 4,
+          cursor: draggable ? 'grab' : 'pointer',
+          fontWeight: 600,
+          fontSize: '0.76rem',
+          color: 'var(--text-dim)',
+          whiteSpace: 'nowrap',
+          userSelect: 'none',
+          opacity: draggedKey === key ? 0.55 : 1,
+          boxShadow: isDropTarget
+            ? dropTarget.edge === 'before'
+              ? 'inset 2px 0 0 var(--accent)'
+              : 'inset -2px 0 0 var(--accent)'
+            : undefined,
+        }}
+      >
+        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{label}</span>
+        {sort?.key === key && <span aria-hidden>{sort.dir === 'asc' ? '▲' : '▼'}</span>}
+        {column && (
+          <span
+            role="separator"
+            aria-label={`Resize ${column.key} column`}
+            aria-orientation="vertical"
+            aria-valuemin={TABLE_COLUMN_MIN_WIDTH}
+            aria-valuemax={TABLE_COLUMN_MAX_WIDTH}
+            aria-valuenow={resizeDraft?.key === column.key ? resizeDraft.width : column.width}
+            tabIndex={onColumnsChange ? 0 : -1}
+            draggable={false}
+            onClick={(event) => event.stopPropagation()}
+            onDragStart={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+            }}
+            onPointerDown={(event) => startColumnResize(event, column)}
+            onKeyDown={(event) => {
+              if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+              event.preventDefault();
+              event.stopPropagation();
+              persistColumnWidth(column.key, column.width + (event.key === 'ArrowRight' ? 16 : -16));
+            }}
+            style={{
+              position: 'absolute',
+              top: 0,
+              right: -4,
+              width: 8,
+              height: '100%',
+              cursor: 'col-resize',
+              touchAction: 'none',
+              zIndex: 1,
+              borderRight: resizeDraft?.key === column.key ? '2px solid var(--accent)' : undefined,
+            }}
+          />
+        )}
+      </div>
+    );
+  };
 
   const focusTable = (): void => {
     parentRef.current?.focus({ preventScroll: true });
@@ -315,6 +549,11 @@ export function PropertyTable({
     }
     if (!cell) return;
 
+    if ((event.metaKey || event.ctrlKey) && !event.altKey && event.key.toLowerCase() === 'd') {
+      event.preventDefault();
+      if (selectedCells.length > 1) onFillDown?.(selectedCells);
+      return;
+    }
     if (event.key === 'Enter') {
       event.preventDefault();
       startEdit(cell);
@@ -411,13 +650,17 @@ export function PropertyTable({
     >
       <div style={{ minWidth: totalWidth, width: 'max-content' }}>
         <div role="row" aria-rowindex={1} style={{ ...rowStyle, position: 'sticky', top: 0, zIndex: 2, background: 'var(--surface)' }}>
-          <div role="presentation" style={{ ...cellPad, justifyContent: 'center' }}>
+          <div
+            role="presentation"
+            style={{ ...cellPad, position: 'sticky', left: 0, zIndex: 4, justifyContent: 'center', background: 'var(--surface)' }}
+          >
             <input aria-label="Select all rows" type="checkbox" checked={allSelected} onChange={onToggleAll} disabled={selectableRows.length === 0} style={{ accentColor: 'var(--accent)' }} />
           </div>
-          {headerCell(TITLE_SORT_KEY, 'Title', 0, true)}
-          {columns.map((column, index) => headerCell(column.key, column.key, index + 1, true))}
+          {headerCell(TITLE_SORT_KEY, 'Title', 0)}
+          {columns.map((column, index) => headerCell(column.key, column.key, index + 1, column))}
           <button
             onClick={onAddColumn}
+            aria-label="Add property column"
             title="Add property column"
             style={{ margin: '0 auto', display: 'inline-flex', padding: '0.25rem', background: 'none', border: '1px dashed var(--border)', borderRadius: 'var(--radius-sm)', color: 'var(--text-dim)', cursor: 'pointer' }}
           >
@@ -438,8 +681,8 @@ export function PropertyTable({
             if (virtualRow.index >= entries.length) {
               return (
                 <div key="ghost" style={{ ...rowStyle, ...abs, borderBottom: 'none' }}>
-                  <div />
-                  <div style={{ ...cellPad, gridColumn: `2 / ${3 + columns.length}` }}>
+                  <div style={{ position: 'sticky', left: 0, height: '100%', zIndex: 1, background: 'var(--bg)' }} />
+                  <div style={{ ...cellPad, position: 'sticky', left: W_CHECK, zIndex: 1, background: 'var(--bg)', borderRight: '1px solid var(--border)' }}>
                     <input
                       value={draft}
                       onChange={(event) => setDraft(event.target.value)}
@@ -474,9 +717,13 @@ export function PropertyTable({
             const Icon = TYPE_ICON[row.item.type];
             const open = onOpen && isOpenable(row.item) ? onOpen : undefined;
             const titleCell: TableGridCell = { rowId: row.item.id, columnKey: TITLE_SORT_KEY };
+            const stickyBackground = selected.has(row.item.id) ? 'var(--surface-2)' : 'var(--bg)';
             return (
               <div key={row.item.id} role="row" aria-rowindex={rowIndex + 2} data-row-id={row.item.id} style={{ ...rowStyle, ...abs, background: selected.has(row.item.id) ? 'var(--surface-2)' : undefined }}>
-                <div role="presentation" style={{ ...cellPad, justifyContent: 'center' }}>
+                <div
+                  role="presentation"
+                  style={{ ...cellPad, position: 'sticky', left: 0, zIndex: 2, justifyContent: 'center', background: stickyBackground }}
+                >
                   {(row.editable || row.deletable) && (
                     <input aria-label={`Select row ${row.item.title}`} type="checkbox" checked={selected.has(row.item.id)} onChange={() => onToggleSelect(row.item.id)} style={{ accentColor: 'var(--accent)' }} />
                   )}
@@ -494,6 +741,11 @@ export function PropertyTable({
                   title={open ? 'Double-click to open' : undefined}
                   style={{
                     ...cellPad,
+                    position: 'sticky',
+                    left: W_CHECK,
+                    zIndex: 1,
+                    background: stickyBackground,
+                    borderRight: '1px solid var(--border)',
                     ...cellSelectionStyle(rowIndex, 0, titleCell),
                     gap: 8,
                     fontWeight: 500,

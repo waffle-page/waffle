@@ -96,6 +96,10 @@ views:
       - file.name
       - rating
       - time_min
+    columnSize:
+      file.name: 260
+      note.rating: 184
+      note.time_min: 132
     sort:
       - property: rating
         direction: DESC

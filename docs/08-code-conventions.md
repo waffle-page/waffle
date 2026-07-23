@@ -19,7 +19,10 @@ The standing order: **any competent TS developer arriving cold must become produ
 
 ## The quarantine list (irreducibly complex — fence it)
 
-File watching + hash re-association · shared-folder sync (LWW, tombstones) · sandbox RPC bridge · CodeMirror wiring · virtualized masonry.
+File watching + hash re-association · shared-folder sync (LWW, tombstones) ·
+sandbox RPC bridge · CodeMirror wiring · virtualized layouts · table grid
+interaction (`PropertyTable` + `tableGridState`) · bidirectional Obsidian
+config sync.
 
 Rules for these modules: keep each in **one small directory**; header comment states *why it is hairy* and the invariants it protects; each carries a **manual acceptance spec** (in its recipe or header) that a human or agent can execute — when a test runner earns its place, tests inherit that spec verbatim; no application logic inside — they expose a plain interface and the rest of the app never knows the pain.
 
