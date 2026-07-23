@@ -19,20 +19,6 @@ import { loadPropertyMap, vaultDirFor } from './queries';
 
 type PropMap = Map<string, Record<string, PropertyValue>>;
 
-function sortValue(v: PropertyValue | undefined): number | string | null {
-  if (!v) return null;
-  switch (v.kind) {
-    case 'number': return v.value;
-    case 'money': return v.amount;
-    case 'duration': return v.seconds;
-    case 'checkbox': return v.value ? 1 : 0;
-    case 'date': return Date.parse(v.iso) || 0;
-    case 'coords': return v.lat;
-    case 'text': case 'url': return v.value;
-    case 'select': return v.option;
-  }
-}
-
 function TableLayout({ items, folderId = null, onOpen, onMutated, tableConfig, onTableConfig }: LayoutProps) {
   const [propMap, setPropMap] = useState<PropMap | null>(null);
   const [types, setTypes] = useState<PropertyTypes>({});
@@ -96,34 +82,32 @@ function TableLayout({ items, folderId = null, onOpen, onMutated, tableConfig, o
     });
   }, [propMap, types, items, tableConfig?.columns]);
 
-  const rows = useMemo<TableRowData[]>(() => {
-    const base: TableRowData[] = items.map((item) => ({
-      item,
-      props: propMap?.get(item.id) ?? {},
-      editable: item.type === 'note' && !!item.contentRef?.endsWith('.md'),
-    }));
-    const colSort = tableConfig?.colSort;
-    if (!colSort) return base;
-    const mul = colSort.dir === 'asc' ? 1 : -1;
-    return [...base].sort((a, b) => {
-      if (colSort.key === TITLE_SORT_KEY) return mul * a.item.title.localeCompare(b.item.title);
-      const va = sortValue(a.props[colSort.key]);
-      const vb = sortValue(b.props[colSort.key]);
-      if (va === null && vb === null) return 0;
-      if (va === null) return 1; // missing values sink regardless of direction
-      if (vb === null) return -1;
-      if (typeof va === 'number' && typeof vb === 'number') return mul * (va - vb);
-      return mul * String(va).localeCompare(String(vb));
-    });
-  }, [items, propMap, tableConfig?.colSort]);
+  // The view's SQL query already ordered items (queries.ts) — no client sort.
+  const rows = useMemo<TableRowData[]>(
+    () =>
+      items.map((item) => ({
+        item,
+        props: propMap?.get(item.id) ?? {},
+        editable: item.type === 'note' && !!item.contentRef?.endsWith('.md'),
+      })),
+    [items, propMap],
+  );
 
   const rowById = useMemo(() => new Map(rows.map((r) => [r.item.id, r])), [rows]);
 
+  /** Header click cycles: asc → desc → back to the recency default. */
   const onSort = (key: string): void => {
-    const current = tableConfig?.colSort;
-    const next = current?.key !== key ? { key, dir: 'asc' as const } : current.dir === 'asc' ? { key, dir: 'desc' as const } : null;
-    onTableConfig?.({ colSort: next });
+    const current = tableConfig?.sort;
+    const next =
+      current?.key !== key ? { key, dir: 'asc' as const }
+      : current.dir === 'asc' ? { key, dir: 'desc' as const }
+      : { key: '$updated', dir: 'desc' as const };
+    onTableConfig?.({ sort: next });
   };
+
+  const groupCol = tableConfig?.groupBy
+    ? columns.find((c) => c.key === tableConfig.groupBy) ?? { key: tableConfig.groupBy, kind: 'text' as const }
+    : null;
 
   const run = async (work: () => Promise<void>): Promise<void> => {
     setBusy(true);
@@ -253,7 +237,8 @@ function TableLayout({ items, folderId = null, onOpen, onMutated, tableConfig, o
         <PropertyTable
           rows={rows}
           columns={columns}
-          sort={tableConfig?.colSort ?? null}
+          groupBy={groupCol}
+          sort={tableConfig?.sort ?? null}
           onSort={onSort}
           selected={selected}
           onToggleSelect={(id) =>

@@ -18,10 +18,12 @@ export interface LibraryItem {
 /** Resolves a topping's thumbnail to a displayable URL (platform-owned). */
 export type ThumbLoader = (item: LibraryItem) => Promise<string | null>;
 
-/** Table-layout slice of a folder's persisted view config (docs/12). */
+/** Table-layout slice of a view's persisted config (docs/12). */
 export interface TableViewConfig {
   /** Column order; data keys not listed append at render time. */
   columns?: string[];
-  /** Property-column sort ($title = the title column); null/absent = the folder's base sort. */
-  colSort?: { key: string; dir: 'asc' | 'desc' } | null;
+  /** The VIEW's sort ($updated/$title/property key) — the table renders carets and patches it on header click. */
+  sort?: { key: string; dir: 'asc' | 'desc' } | null;
+  /** Property key whose values become section headers. */
+  groupBy?: string | null;
 }

@@ -10,7 +10,7 @@ A **local-first everything-library**. Folders hold **toppings** — notes, links
 
 ## Status
 
-Early development, moving fast. The P0 spine is complete and verified: SQLite (OPFS) index over a real vault, virtualized masonry/grid/list at 20k items, thumbnail pipeline, CodeMirror editor with live preview, add flows, and the first P1 slices — typed properties, the table view (create-row-in-table, bulk edit), and per-entity status + ratings. See `docs/04-phases.md` for the phase ladder.
+Early development, moving fast. The P0 spine is complete and verified: SQLite (OPFS) index over a real vault, virtualized masonry/grid/list at 20k items, thumbnail pipeline, CodeMirror editor with live preview, add flows, and the first P1 slices — typed properties, the table view (create-row-in-table, bulk edit), per-entity status + ratings, and the saved-view manager (multiple named views per folder with defaults, SQL-compiled filters, property sort, group-by). See `docs/04-phases.md` for the phase ladder.
 
 ## Try it
 

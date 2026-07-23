@@ -5,11 +5,11 @@
  * business. Row-virtualized like VirtualList; the header sticks while both
  * axes scroll in one container.
  */
-import { useRef, useState, type CSSProperties, type ReactNode } from 'react';
+import { useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import type { PropertyValue } from '@waffle/core';
 import type { LibraryItem } from './types';
-import { PropertyCell } from './PropertyCell';
+import { formatProperty, PropertyCell } from './PropertyCell';
 import { DashIcon, FileIcon, LinkIcon, NoteIcon, PlusIcon } from './icons';
 
 export interface TableColumn {
@@ -31,6 +31,8 @@ export interface TableRowData {
 export interface PropertyTableProps {
   rows: TableRowData[];
   columns: TableColumn[];
+  /** Section rows by this column's values; rows arrive sorted by the view — grouping re-buckets them. */
+  groupBy?: TableColumn | null;
   sort: { key: string; dir: 'asc' | 'desc' } | null;
   onSort: (key: string) => void;
   selected: ReadonlySet<string>;
@@ -55,14 +57,48 @@ const W_ADD = 44;
 
 const TYPE_ICON = { note: NoteIcon, link: LinkIcon, file: FileIcon, dash: DashIcon } as const;
 
+/** One virtualized line: a group header or a data row. */
+type Entry = { header: string; count: number } | { row: TableRowData };
+
+function groupOrderValue(v: PropertyValue | undefined): number | string | null {
+  if (!v) return null;
+  switch (v.kind) {
+    case 'number': return v.value;
+    case 'money': return v.amount;
+    case 'duration': return v.seconds;
+    case 'checkbox': return v.value ? 1 : 0;
+    case 'date': return Date.parse(v.iso) || 0;
+    default: return formatProperty(v).toLowerCase();
+  }
+}
+
 export function PropertyTable({
-  rows, columns, sort, onSort, selected, onToggleSelect, onToggleAll, onEditCell, canCreate, onCreateRow, onAddColumn, onOpen,
+  rows, columns, groupBy, sort, onSort, selected, onToggleSelect, onToggleAll, onEditCell, canCreate, onCreateRow, onAddColumn, onOpen,
 }: PropertyTableProps) {
   const parentRef = useRef<HTMLDivElement>(null);
   const [editing, setEditing] = useState<{ id: string; key: string } | null>(null);
   const [draft, setDraft] = useState('');
 
-  const count = rows.length + (canCreate ? 1 : 0);
+  const entries = useMemo<Entry[]>(() => {
+    if (!groupBy) return rows.map((row) => ({ row }));
+    const buckets = new Map<string, { order: number | string | null; rows: TableRowData[] }>();
+    for (const row of rows) {
+      const value = row.props[groupBy.key];
+      const label = value ? formatProperty(value) : `No ${groupBy.key}`;
+      const bucket = buckets.get(label) ?? { order: groupOrderValue(value), rows: [] };
+      bucket.rows.push(row);
+      buckets.set(label, bucket);
+    }
+    const sorted = [...buckets.entries()].sort(([, a], [, b]) => {
+      if (a.order === null) return 1; // the "No <key>" bucket sinks
+      if (b.order === null) return -1;
+      if (typeof a.order === 'number' && typeof b.order === 'number') return a.order - b.order;
+      return String(a.order).localeCompare(String(b.order));
+    });
+    return sorted.flatMap(([label, bucket]): Entry[] => [{ header: label, count: bucket.rows.length }, ...bucket.rows.map((row) => ({ row }))]);
+  }, [rows, groupBy]);
+
+  const count = entries.length + (canCreate ? 1 : 0);
   const virtualizer = useVirtualizer({ count, getScrollElement: () => parentRef.current, estimateSize: () => ROW_H, overscan: 12 });
 
   const totalWidth = W_CHECK + W_TITLE + columns.length * W_PROP + W_ADD;
@@ -106,7 +142,7 @@ export function PropertyTable({
           {virtualizer.getVirtualItems().map((v) => {
             const abs: CSSProperties = { position: 'absolute', top: 0, left: 0, right: 0, transform: `translateY(${v.start}px)` };
 
-            if (v.index >= rows.length) {
+            if (v.index >= entries.length) {
               return (
                 <div key="ghost" style={{ ...rowStyle, ...abs, borderBottom: 'none' }}>
                   <div />
@@ -128,7 +164,18 @@ export function PropertyTable({
               );
             }
 
-            const row = rows[v.index]!;
+            const entry = entries[v.index]!;
+            if ('header' in entry) {
+              return (
+                <div key={`g:${entry.header}:${v.index}`} style={{ ...rowStyle, ...abs, gridTemplateColumns: '1fr', background: 'var(--surface-2)', fontWeight: 600, fontSize: '0.78rem' }}>
+                  <div style={{ ...cellPad, gap: 8 }}>
+                    {entry.header}
+                    <span style={{ color: 'var(--text-dim)', fontWeight: 400 }}>{entry.count}</span>
+                  </div>
+                </div>
+              );
+            }
+            const row = entry.row;
             const Icon = TYPE_ICON[row.item.type];
             return (
               <div key={row.item.id} style={{ ...rowStyle, ...abs, background: selected.has(row.item.id) ? 'var(--surface-2)' : undefined }}>

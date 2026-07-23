@@ -1,15 +1,19 @@
 /**
  * The library screen: folder tree + toppings, rendered through the layout
- * registry, with per-folder persisted views. This replaces the dev harness as
- * the app's face (harness stays at ?dev).
+ * registry. Each folder holds NAMED views (tabs) with their own layout, sort,
+ * filters, and grouping; one is the default (ADR-006/-014). This replaces the
+ * dev harness as the app's face (harness stays at ?dev).
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { scanVault } from '@waffle/core';
-import { getLayout, listLayouts, type LibraryItem } from '@waffle/ui';
+import { scanVault, type FilterNode } from '@waffle/core';
+import { FilterPopover, getLayout, listLayouts, ViewTabs, type FilterCondition, type FilterField, type LibraryItem, type TableViewConfig } from '@waffle/ui';
 import { getVaultFs, platform, platformReady, setVaultFs, type PlatformStatus } from '../platform/instance';
 import { fsAccessSupported, pickRealFolder, restoreRealFolder } from '../platform/web/fsAccessFs';
 import { runThumbnailer } from '../thumbs/thumbnailer';
-import { loadFolderTree, loadItems, loadView, saveView, type FolderNode, type FolderViewState, type SortKey } from './queries';
+import {
+  createView, deleteView, listViews, loadFolderTree, loadItems, loadPropertyKeys, renameView, saveViewState, setDefaultView,
+  type FolderNode, type FolderView, type ViewCfg,
+} from './queries';
 import { loadThumb } from './thumbLoader';
 import { FolderTree } from './FolderTree';
 import { AddMenu, type AddAction } from './AddMenu';
@@ -19,6 +23,15 @@ import { LinkDetail } from '../editor/LinkDetail';
 import { findNoteByTitle } from '../editor/resolve';
 import './TableLayout'; // registers the 'table' layout (same load-time pattern as @waffle/ui's entries)
 
+/** cfg.filters is a flat AND of cmps in v1 — the popover edits exactly that. */
+const toConditions = (filters: FilterNode | null): FilterCondition[] =>
+  filters && filters.op === 'and'
+    ? filters.children.filter((c): c is Extract<FilterNode, { op: 'cmp' }> => c.op === 'cmp').map((c) => ({ key: c.key, cmp: c.cmp, value: c.value as FilterCondition['value'] }))
+    : [];
+
+const toFilterNode = (conditions: FilterCondition[]): FilterNode | null =>
+  conditions.length === 0 ? null : { op: 'and', children: conditions.map((c) => ({ op: 'cmp' as const, key: c.key, cmp: c.cmp, value: c.value })) };
+
 export function Library() {
   const [status, setStatus] = useState<PlatformStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -26,8 +39,23 @@ export function Library() {
   const [selected, setSelected] = useState<string | null>(null);
   // null = loading (never show "empty" while a query is in flight)
   const [items, setItems] = useState<LibraryItem[] | null>(null);
+  const [views, setViews] = useState<FolderView[]>([]);
+  const [activeId, setActiveId] = useState<string | null>(null);
+  const [filterOpen, setFilterOpen] = useState(false);
+  const [fields, setFields] = useState<FilterField[]>([]);
   const [openNote, setOpenNote] = useState<{ path: string; title: string } | null>(null);
   const [openLink, setOpenLink] = useState<{ item: LibraryItem; url: string } | null>(null);
+
+  const selectedRef = useRef(selected);
+  selectedRef.current = selected;
+  // Latest views/active, immune to stale closures: two rapid patches (layout
+  // then sort) must compose, not overwrite each other.
+  const viewsRef = useRef(views);
+  viewsRef.current = views;
+  const activeIdRef = useRef(activeId);
+  activeIdRef.current = activeId;
+
+  const activeView = views.find((v) => v.id === activeId) ?? null;
 
   const onOpenItem = (item: LibraryItem): void => {
     // Notes → editor. Links → detail view (docs/10). Files/dash open in later slices.
@@ -64,48 +92,17 @@ export function Library() {
     return find(roots)?.vaultPath ?? '';
   };
 
-  const onAdd = async (action: AddAction): Promise<void> => {
-    try {
-      const fs = await getVaultFs();
-      const dir = targetDir();
-      if (action.kind === 'note') {
-        const notePath = await createNote(fs, dir, action.name);
-        await syncVault();
-        setOpenNote({ path: notePath, title: notePath.split('/').pop()!.replace(/\.md$/, '') });
-      } else if (action.kind === 'link') {
-        await createLink(fs, dir, action.url);
-        await syncVault();
-      } else {
-        await addFiles(fs, dir, action.files);
-        await syncVault();
-      }
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    }
-  };
-
-  const onDrop = (e: React.DragEvent): void => {
-    e.preventDefault();
-    const files = [...e.dataTransfer.files];
-    if (files.length) void onAdd({ kind: 'files', files });
-  };
-  const [view, setView] = useState<FolderViewState>({ layout: 'grid', sort: 'updated' });
-  // Latest view, immune to stale closures: two rapid changes (layout then sort)
-  // must compose, not overwrite each other.
-  const viewRef = useRef(view);
-  viewRef.current = view;
-
-  const totalCount = countTree(roots);
-
-  const selectedRef = useRef(selected);
-  selectedRef.current = selected;
+  const activeCfg = (): ViewCfg | null => viewsRef.current.find((v) => v.id === activeIdRef.current)?.cfg ?? null;
 
   const openFolder = useCallback(async (folderId: string | null) => {
     setSelected(folderId);
     setItems(null);
-    const v = await loadView(folderId);
-    setView(v);
-    setItems(await loadItems(folderId, v.sort));
+    setFilterOpen(false);
+    const list = await listViews(folderId);
+    const initial = list.find((v) => v.isDefault) ?? list[0]!;
+    setViews(list);
+    setActiveId(initial.id);
+    setItems(await loadItems(folderId, initial.cfg));
   }, []);
 
   const refreshAll = useCallback(async () => {
@@ -117,7 +114,8 @@ export function Library() {
   // keeps its scroll position, selection, and mounted editors across edits.
   const refreshQuiet = useCallback(async () => {
     setRoots(await loadFolderTree());
-    setItems(await loadItems(selectedRef.current, viewRef.current.sort));
+    const cfg = activeCfg();
+    if (cfg) setItems(await loadItems(selectedRef.current, cfg));
   }, []);
 
   /** Scan the active vault, generate missing thumbnails, refresh everything. */
@@ -147,6 +145,32 @@ export function Library() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const onAdd = async (action: AddAction): Promise<void> => {
+    try {
+      const fs = await getVaultFs();
+      const dir = targetDir();
+      if (action.kind === 'note') {
+        const notePath = await createNote(fs, dir, action.name);
+        await syncVault();
+        setOpenNote({ path: notePath, title: notePath.split('/').pop()!.replace(/\.md$/, '') });
+      } else if (action.kind === 'link') {
+        await createLink(fs, dir, action.url);
+        await syncVault();
+      } else {
+        await addFiles(fs, dir, action.files);
+        await syncVault();
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  const onDrop = (e: React.DragEvent): void => {
+    e.preventDefault();
+    const files = [...e.dataTransfer.files];
+    if (files.length) void onAdd({ kind: 'files', files });
+  };
+
   const onPickFolder = async (): Promise<void> => {
     try {
       const fs = await pickRealFolder();
@@ -159,16 +183,66 @@ export function Library() {
     }
   };
 
-  const changeView = async (patch: Partial<FolderViewState>): Promise<void> => {
-    const next = { ...viewRef.current, ...patch };
-    setView(next);
-    await saveView(selected, next);
-    if (patch.sort) setItems(await loadItems(selected, next.sort));
+  // ── View manager ──────────────────────────────────────────────────────────
+
+  const switchView = async (id: string): Promise<void> => {
+    setActiveId(id);
+    setFilterOpen(false);
+    const cfg = viewsRef.current.find((v) => v.id === id)?.cfg;
+    if (cfg) setItems(await loadItems(selectedRef.current, cfg));
   };
 
-  const layout = getLayout(view.layout);
+  /** Patch the active view (optimistic), persist, and requery when results can change. */
+  const patchActive = async (patch: Partial<ViewCfg> & { layout?: string }): Promise<void> => {
+    const current = viewsRef.current.find((v) => v.id === activeIdRef.current);
+    if (!current) return;
+    const { layout, ...cfgPatch } = patch;
+    const next: FolderView = { ...current, layout: layout ?? current.layout, cfg: { ...current.cfg, ...cfgPatch } };
+    setViews(viewsRef.current.map((v) => (v.id === next.id ? next : v)));
+    await saveViewState(next.id, next.layout, next.cfg);
+    if ('sort' in cfgPatch || 'filters' in cfgPatch) setItems(await loadItems(selectedRef.current, next.cfg));
+  };
+
+  const onCreateView = async (name: string): Promise<void> => {
+    const view = await createView(selectedRef.current, name);
+    setViews([...viewsRef.current, view]);
+    await switchView(view.id);
+  };
+
+  const onDeleteView = async (id: string): Promise<void> => {
+    await deleteView(id);
+    const remaining = viewsRef.current.filter((v) => v.id !== id);
+    setViews(remaining);
+    const fallback = remaining.find((v) => v.isDefault) ?? remaining[0];
+    if (fallback) await switchView(fallback.id);
+  };
+
+  const onSetDefaultView = async (id: string): Promise<void> => {
+    await setDefaultView(selectedRef.current, id);
+    setViews(viewsRef.current.map((v) => ({ ...v, isDefault: v.id === id })));
+  };
+
+  const onRenameView = async (id: string, name: string): Promise<void> => {
+    await renameView(id, name);
+    setViews(viewsRef.current.map((v) => (v.id === id ? { ...v, name } : v)));
+  };
+
+  const openFilters = async (): Promise<void> => {
+    if (!filterOpen) {
+      const props = await loadPropertyKeys(selectedRef.current);
+      setFields([{ key: '$title', kind: 'title' }, { key: '$type', kind: 'type' }, { key: '$tag', kind: 'tag' }, ...props.map((p) => ({ key: p.key, kind: p.kind }))]);
+    }
+    setFilterOpen((o) => !o);
+  };
+
+  const layout = getLayout(activeView?.layout ?? 'masonry');
   const LayoutComponent = layout.component;
   const folderName = selected === null ? 'Everything' : findName(roots, selected) ?? '…';
+  const cfg = activeView?.cfg ?? null;
+  const conditionCount = cfg ? toConditions(cfg.filters).length : 0;
+  const sortValue = cfg?.sort.key === '$title' ? '$title' : cfg?.sort.key === '$updated' ? '$updated' : 'prop';
+  const tableConfig: TableViewConfig = { columns: cfg?.columns, sort: cfg?.sort ?? null, groupBy: cfg?.groupBy ?? null };
+  const totalCount = countTree(roots);
 
   return (
     <div style={{ display: 'flex', height: '100vh' }}>
@@ -195,18 +269,37 @@ export function Library() {
       </aside>
 
       <main style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
-        <header style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '0.75rem 1rem', borderBottom: '1px solid var(--border)' }}>
+        <header style={{ position: 'relative', display: 'flex', alignItems: 'center', gap: 12, padding: '0.75rem 1rem', borderBottom: '1px solid var(--border)' }}>
           <h1 style={{ fontSize: '1.05rem', margin: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{folderName}</h1>
           <span style={{ color: 'var(--text-dim)', fontSize: '0.8rem' }}>{items === null ? '…' : items.length.toLocaleString()}</span>
           <div style={{ marginLeft: 'auto', display: 'flex', gap: 6, alignItems: 'center' }}>
             <AddMenu onAdd={(action) => void onAdd(action)} />
+            <button
+              onClick={() => void openFilters()}
+              style={{
+                padding: '0.3rem 0.6rem',
+                fontSize: '0.8rem',
+                border: '1px solid var(--border)',
+                borderRadius: 'var(--radius-sm)',
+                background: conditionCount > 0 || cfg?.groupBy ? 'var(--accent)' : 'var(--surface)',
+                color: conditionCount > 0 || cfg?.groupBy ? 'var(--accent-ink)' : 'var(--text-dim)',
+                cursor: 'pointer',
+              }}
+            >
+              Filter{conditionCount > 0 ? ` · ${conditionCount}` : ''}{cfg?.groupBy ? ' · grouped' : ''}
+            </button>
             <select
-              value={view.sort}
-              onChange={(e) => void changeView({ sort: e.target.value as SortKey })}
+              value={sortValue}
+              onChange={(e) => {
+                const v = e.target.value;
+                if (v === '$updated') void patchActive({ sort: { key: '$updated', dir: 'desc' } });
+                else if (v === '$title') void patchActive({ sort: { key: '$title', dir: 'asc' } });
+              }}
               style={{ background: 'var(--surface)', color: 'var(--text)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '0.3rem 0.5rem', fontSize: '0.8rem' }}
             >
-              <option value="updated">Recently updated</option>
-              <option value="title">Title A–Z</option>
+              <option value="$updated">Recently updated</option>
+              <option value="$title">Title A–Z</option>
+              {sortValue === 'prop' && cfg && <option value="prop">{cfg.sort.key} {cfg.sort.dir === 'asc' ? '▲' : '▼'}</option>}
             </select>
             {listLayouts().map((entry) => {
               const Icon = entry.icon;
@@ -215,7 +308,7 @@ export function Library() {
                 <button
                   key={entry.key}
                   title={entry.label}
-                  onClick={() => void changeView({ layout: entry.key })}
+                  onClick={() => void patchActive({ layout: entry.key })}
                   style={{
                     display: 'inline-flex',
                     padding: '0.35rem 0.5rem',
@@ -232,13 +325,39 @@ export function Library() {
               );
             })}
           </div>
+          {filterOpen && cfg && (
+            <FilterPopover
+              fields={fields}
+              conditions={toConditions(cfg.filters)}
+              groupBy={cfg.groupBy}
+              groupChoices={fields.filter((f) => !f.key.startsWith('$')).map((f) => f.key)}
+              onApply={(conditions, groupBy) => {
+                setFilterOpen(false);
+                void patchActive({ filters: toFilterNode(conditions), groupBy });
+              }}
+              onClose={() => setFilterOpen(false)}
+            />
+          )}
         </header>
+
+        {activeId && (
+          <ViewTabs
+            views={views.map((v) => ({ id: v.id, name: v.name, isDefault: v.isDefault }))}
+            activeId={activeId}
+            onSelect={(id) => void switchView(id)}
+            onCreate={(name) => void onCreateView(name)}
+            onRename={(id, name) => void onRenameView(id, name)}
+            onDelete={(id) => void onDeleteView(id)}
+            onSetDefault={(id) => void onSetDefaultView(id)}
+          />
+        )}
 
         <div style={{ flex: 1, minHeight: 0, background: 'var(--bg)', position: 'relative' }} onDragOver={(e) => e.preventDefault()} onDrop={onDrop}>
           {error ? (
             <pre style={{ color: 'var(--ink-blush)', padding: '1rem', whiteSpace: 'pre-wrap' }}>{error}</pre>
-          ) : items === null ? null : items.length === 0 && view.layout !== 'table' ? (
-            // The table renders even empty: its ghost row IS the add affordance (docs/12).
+          ) : items === null ? null : items.length === 0 && layout.key !== 'table' && conditionCount === 0 ? (
+            // The table renders even empty (its ghost row IS the add affordance,
+            // docs/12), and a filtered-to-zero view must show its zero.
             <div style={{ padding: '3rem 1rem', textAlign: 'center', color: 'var(--text-dim)' }}>
               <p style={{ fontFamily: 'var(--font-head)', fontSize: '1rem' }}>Nothing here yet</p>
               <p style={{ fontSize: '0.85rem' }}>Add toppings, or open the <a href="?dev" style={{ color: 'var(--accent-ink)' }}>dev harness</a> to seed data.</p>
@@ -250,8 +369,14 @@ export function Library() {
               onOpen={onOpenItem}
               folderId={selected}
               onMutated={refreshQuiet}
-              tableConfig={{ columns: view.columns, colSort: view.colSort ?? null }}
-              onTableConfig={(patch) => void changeView(patch)}
+              tableConfig={tableConfig}
+              onTableConfig={(patch) => {
+                const p: Partial<ViewCfg> = {};
+                if (patch.columns) p.columns = patch.columns;
+                if (patch.sort) p.sort = patch.sort;
+                if ('groupBy' in patch) p.groupBy = patch.groupBy ?? null;
+                void patchActive(p);
+              }}
             />
           )}
           {openNote && (

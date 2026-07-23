@@ -2,7 +2,7 @@
  * Library data access — named queries, plain SQL (docs/08: SQL is the query
  * language, no ORM). Every function returns presentation-ready shapes.
  */
-import { fromEavColumns, type PropertyValue } from '@waffle/core';
+import { fromEavColumns, type FilterNode, type PropertyValue } from '@waffle/core';
 import type { LibraryItem } from '@waffle/ui';
 import { platform } from '../platform/instance';
 
@@ -49,20 +49,160 @@ export async function loadFolderTree(): Promise<FolderNode[]> {
   return roots;
 }
 
-export type SortKey = 'updated' | 'title';
+// ── Views (ADR-006/-014: folders hold many named views; one is the default) ──
 
-const SORT_SQL: Record<SortKey, string> = {
-  updated: 't.updated_at DESC',
-  title: 't.title COLLATE NOCASE ASC',
-};
+/** Sort key: '$updated' | '$title' | a frontmatter property key ($-prefix reserved for built-ins). */
+export interface ViewSort {
+  key: string;
+  dir: 'asc' | 'desc';
+}
+
+export interface ViewCfg {
+  sort: ViewSort;
+  /** Flat AND of cmp nodes in v1 UI; stored as the core FilterNode for forward-compat. */
+  filters: FilterNode | null;
+  groupBy: string | null;
+  /** Table layout: column order; data keys not listed append at render time. */
+  columns?: string[];
+}
+
+export interface FolderView {
+  id: string;
+  name: string;
+  layout: string;
+  isDefault: boolean;
+  position: number;
+  cfg: ViewCfg;
+}
+
+const DEFAULT_CFG: ViewCfg = { sort: { key: '$updated', dir: 'desc' }, filters: null, groupBy: null };
+
+/** Configs written before the view manager stored sort as 'updated'|'title' + a separate colSort. */
+function parseCfg(json: string): ViewCfg {
+  const raw = JSON.parse(json) as { sort?: ViewSort | 'updated' | 'title'; colSort?: ViewSort | null; filters?: FilterNode | null; groupBy?: string | null; columns?: string[] };
+  let sort: ViewSort =
+    raw.sort === 'title' ? { key: '$title', dir: 'asc' }
+    : raw.sort && typeof raw.sort === 'object' ? raw.sort
+    : { key: '$updated', dir: 'desc' };
+  if (raw.colSort) sort = raw.colSort;
+  const cfg: ViewCfg = { sort, filters: raw.filters ?? null, groupBy: raw.groupBy ?? null };
+  if (raw.columns) cfg.columns = raw.columns;
+  return cfg;
+}
+
+/** All views of a folder, creating the Default on first touch (id keeps the pre-manager scheme). */
+export async function listViews(folderId: string | null): Promise<FolderView[]> {
+  const rows = await platform.db.exec<{ id: string; name: string; layout: string; config: string; is_default: number; position: number }>(
+    `SELECT id, name, layout, config, is_default, position FROM views WHERE folder_id IS ? ORDER BY position, name`,
+    [folderId],
+  );
+  if (rows.length === 0) {
+    const view: FolderView = { id: `v_${folderId ?? 'root'}`, name: 'Default', layout: 'masonry', isDefault: true, position: 1, cfg: DEFAULT_CFG };
+    await platform.db.exec(
+      `INSERT OR IGNORE INTO views (id, folder_id, name, layout, config, kind, is_default, position) VALUES (?,?,?,?,?,'shared',1,1)`,
+      [view.id, folderId, view.name, view.layout, JSON.stringify(view.cfg)],
+    );
+    return [view];
+  }
+  const views = rows.map((r) => ({ id: r.id, name: r.name, layout: r.layout, isDefault: r.is_default === 1, position: r.position, cfg: parseCfg(r.config) }));
+  if (!views.some((v) => v.isDefault)) views[0]!.isDefault = true;
+  return views;
+}
+
+export async function createView(folderId: string | null, name: string): Promise<FolderView> {
+  const rows = await platform.db.exec<{ maxpos: number | null }>(`SELECT MAX(position) AS maxpos FROM views WHERE folder_id IS ?`, [folderId]);
+  const view: FolderView = { id: `v_${crypto.randomUUID()}`, name, layout: 'masonry', isDefault: false, position: (rows[0]?.maxpos ?? 0) + 1, cfg: DEFAULT_CFG };
+  await platform.db.exec(
+    `INSERT INTO views (id, folder_id, name, layout, config, kind, is_default, position) VALUES (?,?,?,?,?,'shared',0,?)`,
+    [view.id, folderId, view.name, view.layout, JSON.stringify(view.cfg), view.position],
+  );
+  return view;
+}
+
+export async function renameView(id: string, name: string): Promise<void> {
+  await platform.db.exec(`UPDATE views SET name = ? WHERE id = ?`, [name, id]);
+}
+
+export async function deleteView(id: string): Promise<void> {
+  await platform.db.exec(`DELETE FROM view_order WHERE view_id = ?`, [id]);
+  await platform.db.exec(`DELETE FROM views WHERE id = ?`, [id]);
+}
+
+export async function setDefaultView(folderId: string | null, id: string): Promise<void> {
+  await platform.db.exec(`UPDATE views SET is_default = 0 WHERE folder_id IS ?`, [folderId]);
+  await platform.db.exec(`UPDATE views SET is_default = 1 WHERE id = ?`, [id]);
+}
+
+export async function saveViewState(id: string, layout: string, cfg: ViewCfg): Promise<void> {
+  await platform.db.exec(`UPDATE views SET layout = ?, config = ? WHERE id = ?`, [layout, JSON.stringify(cfg), id]);
+}
+
+// ── Items query (one path for every layout: filters + sort compile to SQL) ──
+
+const CMP_SQL = { eq: '=', ne: '!=', lt: '<', lte: '<=', gt: '>', gte: '>=' } as const;
+
+/**
+ * FilterNode → WHERE fragment. Property cmps use EXISTS over the EAV rows —
+ * numeric when the value is number/boolean (value_num carries the canonical
+ * unit per kind, incl. Date.parse ms), text otherwise. A row lacking the key
+ * matches no cmp, including `ne` — deliberate: filters select among rows that
+ * HAVE the property.
+ */
+function filterSql(node: FilterNode, params: unknown[]): string {
+  if (node.op !== 'cmp') {
+    if (node.children.length === 0) return '1';
+    return '(' + node.children.map((c) => filterSql(c, params)).join(` ${node.op.toUpperCase()} `) + ')';
+  }
+  if (node.key === '$title') {
+    params.push(node.cmp === 'contains' ? `%${String(node.value)}%` : String(node.value));
+    return node.cmp === 'contains' ? `t.title LIKE ?` : `t.title ${CMP_SQL[node.cmp as keyof typeof CMP_SQL] ?? '='} ?`;
+  }
+  if (node.key === '$type') {
+    params.push(String(node.value));
+    return `t.type = ?`;
+  }
+  if (node.cmp === 'tagged') {
+    params.push(String(node.value).toLowerCase());
+    return `EXISTS (SELECT 1 FROM topping_tags tt JOIN tags g ON g.id = tt.tag_id WHERE tt.topping_id = t.id AND g.name = ?)`;
+  }
+  const numeric = typeof node.value === 'number' || typeof node.value === 'boolean';
+  if (numeric) {
+    params.push(node.key, typeof node.value === 'boolean' ? (node.value ? 1 : 0) : node.value);
+    return `EXISTS (SELECT 1 FROM properties p WHERE p.topping_id = t.id AND p.key = ? AND p.value_num ${CMP_SQL[node.cmp as keyof typeof CMP_SQL] ?? '='} ?)`;
+  }
+  if (node.cmp === 'contains') {
+    params.push(node.key, `%${String(node.value)}%`);
+    return `EXISTS (SELECT 1 FROM properties p WHERE p.topping_id = t.id AND p.key = ? AND p.value_text LIKE ?)`;
+  }
+  params.push(node.key, String(node.value));
+  return `EXISTS (SELECT 1 FROM properties p WHERE p.topping_id = t.id AND p.key = ? AND p.value_text ${CMP_SQL[node.cmp as keyof typeof CMP_SQL] ?? '='} ?)`;
+}
 
 /**
  * folderId null ⇒ everything (the whole library, the 20k virtualization case).
  * Deliberately no per-row tag subquery — a correlated GROUP_CONCAT over 20k
  * rows costs seconds; tags join the card via windowed fetch in P0 step 5.
  */
-export async function loadItems(folderId: string | null, sort: SortKey): Promise<LibraryItem[]> {
-  const where = folderId ? 'AND t.folder_id = ?' : '';
+export async function loadItems(folderId: string | null, cfg: ViewCfg): Promise<LibraryItem[]> {
+  const dir = cfg.sort.dir === 'asc' ? 'ASC' : 'DESC';
+  const params: unknown[] = [];
+  let join = '';
+  let order: string;
+  if (cfg.sort.key === '$updated') order = `t.updated_at ${dir}`;
+  else if (cfg.sort.key === '$title') order = `t.title COLLATE NOCASE ${dir}`;
+  else {
+    join = `LEFT JOIN properties s ON s.topping_id = t.id AND s.key = ?`;
+    params.push(cfg.sort.key);
+    // Rows without the property sink to the end regardless of direction.
+    order = `(s.topping_id IS NULL) ASC, s.value_num ${dir}, s.value_text COLLATE NOCASE ${dir}`;
+  }
+  let where = '';
+  if (folderId) {
+    where += ' AND t.folder_id = ?';
+    params.push(folderId);
+  }
+  if (cfg.filters) where += ` AND ${filterSql(cfg.filters, params)}`;
+
   const rows = await platform.db.exec<{
     id: string;
     type: LibraryItem['type'];
@@ -75,10 +215,10 @@ export async function loadItems(folderId: string | null, sort: SortKey): Promise
     thumb_aspect: number | null;
   }>(
     `SELECT t.id, t.type, t.title, t.content_ref, t.source, f.name AS folder, t.thumb_ref, t.thumb_color, t.thumb_aspect
-     FROM toppings t JOIN folders f ON f.id = t.folder_id
+     FROM toppings t JOIN folders f ON f.id = t.folder_id ${join}
      WHERE t.deleted_at IS NULL ${where}
-     ORDER BY ${SORT_SQL[sort]}`,
-    folderId ? [folderId] : [],
+     ORDER BY ${order}`,
+    params,
   );
   return rows.map((r) => ({
     id: r.id,
@@ -93,34 +233,22 @@ export async function loadItems(folderId: string | null, sort: SortKey): Promise
   }));
 }
 
-export interface FolderViewState {
-  layout: string;
-  sort: SortKey;
-  /** Table layout only (docs/12): column order + property-column sort. */
-  columns?: string[];
-  colSort?: { key: string; dir: 'asc' | 'desc' } | null;
+export interface PropertyField {
+  key: string;
+  kind: PropertyValue['kind'];
 }
 
-const DEFAULT_VIEW: FolderViewState = { layout: 'masonry', sort: 'updated' };
-
-/** Per-folder persisted view (ADR: folders remember their arrangement). */
-export async function loadView(folderId: string | null): Promise<FolderViewState> {
-  const rows = await platform.db.exec<{ layout: string; config: string }>(
-    `SELECT layout, config FROM views WHERE id = ?`,
-    [viewId(folderId)],
+/** Distinct property keys in a folder with their modal kind — feeds filter/group/sort pickers. */
+export async function loadPropertyKeys(folderId: string | null): Promise<PropertyField[]> {
+  const where = folderId ? 'AND t.folder_id = ?' : '';
+  const rows = await platform.db.exec<{ key: string; kind: PropertyValue['kind']; n: number }>(
+    `SELECT p.key, p.kind, COUNT(*) AS n FROM properties p JOIN toppings t ON t.id = p.topping_id
+     WHERE t.deleted_at IS NULL ${where} GROUP BY p.key, p.kind ORDER BY p.key, n DESC`,
+    folderId ? [folderId] : [],
   );
-  if (rows.length === 0) return DEFAULT_VIEW;
-  const config = JSON.parse(rows[0]!.config) as { sort?: SortKey; columns?: string[]; colSort?: FolderViewState['colSort'] };
-  return { layout: rows[0]!.layout, sort: config.sort ?? 'updated', columns: config.columns, colSort: config.colSort ?? null };
-}
-
-export async function saveView(folderId: string | null, state: FolderViewState): Promise<void> {
-  await platform.db.exec(
-    `INSERT INTO views (id, folder_id, name, layout, config, kind, is_default, position)
-     VALUES (?, ?, 'Default', ?, ?, 'shared', 1, 1)
-     ON CONFLICT(id) DO UPDATE SET layout = excluded.layout, config = excluded.config`,
-    [viewId(folderId), folderId, state.layout, JSON.stringify({ sort: state.sort, columns: state.columns, colSort: state.colSort ?? undefined })],
-  );
+  const fields: PropertyField[] = [];
+  for (const r of rows) if (fields[fields.length - 1]?.key !== r.key) fields.push({ key: r.key, kind: r.kind });
+  return fields;
 }
 
 /**
@@ -154,5 +282,3 @@ export async function vaultDirFor(folderId: string | null): Promise<string | nul
   const rows = await platform.db.exec<{ path: string | null }>(`SELECT path FROM folders WHERE id = ?`, [folderId]);
   return rows[0]?.path ? rows[0].path.slice(1) : null;
 }
-
-const viewId = (folderId: string | null): string => `v_${folderId ?? 'root'}`;
