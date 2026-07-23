@@ -107,3 +107,10 @@ Known deferred gaps (each states its owner): list property kind (Obsidian
 `multitext` skips until it exists), filter NOT/negation (skipped on import),
 link/file properties (`.waffle/meta.json`, ADR-013), restore-from-trash UI,
 vault switcher (single active vault is documented v1 behavior).
+
+**Escalation rule:** this file and the docs carry the engineering contract and
+the agreed queue — nothing more. Product direction, prioritization changes,
+and anything touching money, accounts, publishing, or third-party services are
+the repo owner's decisions: when a task needs one, STOP and ask; don't
+improvise. GitHub side: work in this repo only — never push to `waffle-shell`
+(the deploy workflow owns it), never touch Actions secrets or repo settings.
