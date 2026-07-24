@@ -10,8 +10,13 @@ day; every change is reviewed against that, not against taste.
 2. `docs/08-code-conventions.md` — the LAW: legibility SLO, dependency budget, quarantine rules.
 3. `docs/03-adr.md` — the load-bearing decisions. Treat as settled; open an issue to reopen one.
 4. `docs/02-architecture.md` — stack, storage classes, the Finder covenant.
-5. Per-area specs as needed: `docs/12` (tables/notes-as-rows), `docs/10` (link details), `docs/09` (status/ratings), `docs/05`–`07` (connectors, schemas, catalog).
-6. `docs/recipes/` — how to extend each seam. Update the recipe in the same PR that changes a seam.
+5. Before product-shell, identity, account, sync, sharing, or discovery work:
+   `docs/13-experiences-and-suggestions.md` and
+   `docs/14-identity-sync-and-encryption.md`.
+6. Other per-area specs as needed: `docs/12` (tables/notes-as-rows), `docs/10`
+   (link details), `docs/09` (status/ratings), `docs/05`–`07` (connectors,
+   schemas, catalog).
+7. `docs/recipes/` — how to extend each seam. Update the recipe in the same PR that changes a seam.
 
 ## The invariants that must never break
 
@@ -33,6 +38,15 @@ graph LR
 
 - **Deletes are soft** (ADR-021): files move to `.trash/` inside the vault.
   Nothing in the app hard-deletes user bytes.
+- **Identity before network features** (ADR-022): current v1 folder IDs are
+  path-derived and topping IDs live only in the disposable mirror. Lists,
+  duplication, publishing, Sync, and Share MUST NOT rely on them until durable
+  IDs persist under `.waffle/` and survive index reconstruction.
+- **Accountless is permanent; sign-in is not consent to upload** (ADR-023).
+  Sync, Share, and Publish are separate explicit ceremonies. When built,
+  personal and shared private content is end-to-end encrypted; Supabase stores
+  ciphertext and RLS is defense in depth. Never invent cryptography — docs/14's
+  security/ADR gate precedes implementation.
 - **Obsidian config syncs both ways** (ADR-020): `.base` view edits in Waffle
   write back via YAML document surgery. Owned keys only; when a state can't be
   expressed in Bases, FREEZE (write nothing) — never corrupt a user file.
@@ -153,22 +167,50 @@ serialize, dirty deletion flushes before trash, and failed deletion leaves the
 draft recoverable. The dev harness provides an external-property conflict
 probe for the executable acceptance procedure.
 
+**Product/architecture clarification recorded (docs only, 2026-07-24):**
+beginner-facing folders become purpose-shaped experiences assembled from
+ordinary views/properties/Lists/dashboards; layouts remain advanced primitives
+behind **+ Custom view**. Suggestions may propose the correct folder, view,
+List, cover, source, or item only when they save work; they never auto-mutate.
+The universal bottom-right Add surface combines capture and contextual
+discovery, while search exposes This folder / All saved / Discover. Exact
+invariants and sequence: `docs/13-experiences-and-suggestions.md`.
+
+Accountless local use is a permanent product mode. Optional managed personal
+sync and shared folders are end-to-end encrypted; publishing is a separate
+public projection. Large restores hydrate metadata first, but managed Sync is
+library storage rather than a Google Drive clone: oversized files remain
+explicitly local-only or external-provider references. Durable identity,
+device keys, recovery, rekeying, conflict copies, remote-only scanner
+semantics, quota failure, and restore gates: `docs/14-identity-sync-and-encryption.md`.
+
 **Next, in agreed order:**
 
-1. **P1 remainder**: status/ratings surfacing in library views (chips +
-   interaction filters), theme palette editor, Supabase auth, Capacitor shell
-   (share extension), Tauri shell (native FS watching — replaces the
-   per-write-site rescans with a real watcher), on-device Whisper.
-2. **P2 sharing opens with two distinct surfaces**: collaborative invite links
-   and unlisted public publishing for a single topping or folder. Public links
-   are revocable, read-only projections with stable, crawler-fetchable
-   Open Graph/Twitter Card images for WhatsApp and equivalent unfurlers. The
-   engineering contract and pre-implementation ADR gate are in `docs/04`.
+1. **Finish the existing P1 semantic surface**: status/ratings chips +
+   interaction filters in library layouts.
+2. **P1 usability shell**: repair sticky-Title occlusion and number steppers;
+   dismissible transient panels; visible Trash; Activity & Issues for sync/
+   operation errors; This folder / All saved search over existing FTS; and the
+   responsive bottom-right Add capture sheet. Preserve table ghost-row and all
+   interaction regressions.
+3. **Settings + identity**: theme palette plus locale/timezone/week-start/unit/
+   currency preferences; then durable vault/folder/topping identity under
+   `.waffle/` (ADR-022) before any List/duplicate/network code depends on IDs.
+4. **Optional identity and shells**: Supabase Auth with NO upload side effect;
+   Capacitor share extension; Tauri watcher; on-device Whisper.
+5. **P2 encrypted sync/sharing + discovery**: only after docs/14's threat-model
+   and restore gates. Personal Sync, collaborative invite links, and unlisted
+   public publishing are distinct surfaces. Add local experience/folder
+   suggestions first, then catalog sources/pins plus Map, Calendar, and
+   editable Timeline. Public links retain the crawler-fetchable preview
+   contract in `docs/04`.
 
 Known deferred gaps (each states its owner): link/file properties
-(`.waffle/meta.json`, ADR-013), restore-from-trash UI, vault switcher (single
-active vault is documented v1 behavior), manual acceptance specs for the
-remaining quarantine modules (the table contract now lives at
+(`.waffle/meta.json`, ADR-013), the current path/index-only identity limitation
+(must be removed in step 3 above), restore-from-trash UI, vault switcher
+(single active vault is documented v1 behavior), duplicate topping(s), Lists,
+and manual acceptance specs for the remaining quarantine modules (the table
+contract now lives at
 `docs/recipes/verify-table-interactions.md` and the Obsidian contract at
 `docs/recipes/extend-obsidian-sync.md`; write the others as recipes/headers when
 next touching each module).

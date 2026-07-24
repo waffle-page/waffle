@@ -14,8 +14,8 @@ graph TB
         CX[Connector sandbox — planned, P2]
     end
     Clients --> Core
-    subgraph Server["Supabase (P2+)"]
-        AUTH[Auth] --- SHARE[Shared folders] --- IDX[Global link index]
+    subgraph Server["Supabase + private services (P2+)"]
+        AUTH[Optional auth] --- SHARE[Encrypted sync/shared ciphertext] --- IDX[Global link index]
     end
     Core <--> Server
 ```
@@ -28,18 +28,23 @@ graph TB
 | Mobile | Capacitor | Same bundle + native plugins: camera, mic, native SQLite, **share extension** ("Save to Waffle") |
 | Desktop | Tauri 2 wrapper | Native-grade FS watching for the Finder covenant; PWA alone lacks it on Safari |
 | Data | SQLite behind one adapter — `@sqlite.org/sqlite-wasm` over OPFS (web), native drivers (Capacitor/Tauri) | One schema and query language on every platform; FTS5 for search |
-| Server | Supabase — auth, shared folders (Postgres + RLS), storage, edge functions | Grants enforced in the database, not app code; deferred to P2+ |
+| Server | Supabase — optional auth, encrypted sync/shared envelopes, storage, edge functions | RLS gates ciphertext access; member devices hold plaintext keys; deferred to P2+ |
 
-## Two storage classes, one UI
+## Two canonical storage classes, explicit cloud states
 
 | | Private folders | Shared folders |
 | --- | --- | --- |
-| Canonical home | Files on device (`.md` + frontmatter) | Server (Supabase) |
-| Offline | Always fully local | Local SQLite cache, sync on reconnect |
-| Conflicts | n/a (single writer) | Last-write-wins per topping + tombstones; note co-editing later |
-| The DB's role | Disposable, rebuildable index | Authoritative replica cache |
+| Canonical representation | Files (`.md`, `.url`, real assets, `.dash`, `.list`) | Server-homed encrypted file/object revisions |
+| Without managed service | Entirely local; no account | n/a |
+| Personal Sync | End-to-end encrypted replica/transport; files remain truth | n/a |
+| Offline | Local files; large restored vaults may be selectively hydrated on a new device | Decrypted local SQLite/file cache; sync on reconnect |
+| Conflicts | File versions + explicit conflict copies once multiple devices exist | Last-write-wins per topping + tombstones first; note co-editing later |
+| The DB's role | Disposable, rebuildable index | Decrypted local cache of authoritative ciphertext state |
 
-Sharing a private folder promotes its subtree to server-homed (one-way ceremony). The UI never shows the seam.
+Sharing a private folder promotes its subtree to server-homed encrypted state
+(one-way ceremony). Public publishing is a separate derived projection, never a
+third canonical class. Accountless mode, key ownership, restore hydration, and
+quota failure behavior are specified in `14-identity-sync-and-encryption.md`.
 
 ## The Finder covenant (desktop)
 
@@ -64,9 +69,29 @@ Drag in/out via Finder; the watcher follows; files moved while the app was close
 
 `grants (folder_id, grantee: user | invite-link, role: viewer | editor)`. Effective access = **nearest ancestor grant**; no deny rules; inheritance covers the subtree. Views in shared folders come in two kinds: shared (folder canon) and personal (per-member). `owner_id` + grants exist in the schema from day 0, dormant until identity ships — retrofitting ACLs is migration hell.
 
+Supabase Auth/RLS decides which encrypted envelopes a session may request.
+Folder/member keys decide who can decrypt them. Membership changes rotate the
+key epoch; revocation cannot erase copies a former member already downloaded.
+Server search over private plaintext is forbidden — clients decrypt and query
+their local SQLite cache.
+
+## Durable identity gate
+
+Network features cannot rely on the current v1 path-derived folder identity or
+index-created topping UUIDs. Vault, folder, and topping IDs must first persist
+under `.waffle/` and survive renames plus complete SQLite reconstruction.
+Content hashes assist re-association but are never identity. A duplicate always
+gets a new ID. Full gate: `14-identity-sync-and-encryption.md`.
+
 ## View engine
 
 A view = `{layout, filters AST, sorts, group_by, visible properties, subtree?}` scoped to a folder (or to a query = smart folder). Layouts and widgets resolve through a **renderer registry**: every renderer is `(query results → props) → component`. Manual ordering uses fractional index keys (one write per drop, no renumbering). Natural-language view creation compiles user intent to the filter AST via LLM structured output.
+
+An experience recipe materializes several ordinary views plus declarations,
+field roles, and optional Lists/dashboards for a purpose such as Trip Planner.
+It is scaffolding, not another runtime engine; accepted results become
+user-owned and never change because a later suggestion changes. See
+`13-experiences-and-suggestions.md`.
 
 ## Theming
 
@@ -75,7 +100,7 @@ User-configurable palettes, architected at the token layer so it can never requi
 - **Semantic tokens only.** ~20 CSS custom properties (`--bg`, `--surface`, `--border`, `--text`, `--text-dim`, `--accent`, states…). Components reference tokens exclusively — a raw hex in a component is a review-blocker (see 08-code-conventions.md).
 - **Themes are token-value sets.** Built-ins (light, dark, system-follow) ship at P0 step 4; the **palette editor** ships P1: users pick a few *seeds* (accent, neutral base, light/dark), the engine derives the full ladder — surface elevations, border strengths, text tiers, state colors — in **OKLCH** (perceptually uniform, so derived scales stay legible). A WCAG contrast check warns on unreadable combinations before applying.
 - **Renderers consume tokens too**: charts, dashboard widgets, mermaid, and map styles re-color with the theme — one system, no per-widget theming.
-- **Storage**: theme choice + custom palettes in the local `settings` KV (synced with the account later). A theme serializes to a small JSON doc — shareable, and eventually distributable through the same package/store machinery as connectors and renderer packs.
+- **Storage**: theme choice + custom palettes in the local `settings` KV (included in encrypted personal sync only when explicitly enabled). Locale, timezone, week start, units, and preferred currency use the same settings layer; field/folder overrides beat user preferences, which beat device defaults. A theme serializes to a small JSON doc — shareable, and eventually distributable through the same package/store machinery as connectors and renderer packs.
 
 ### Waffle default theme (brand, set 2026-07-22)
 

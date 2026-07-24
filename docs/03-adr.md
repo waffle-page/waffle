@@ -70,3 +70,34 @@ The client is open source (AGPL-3.0, this repo); the connector SDK and `waffle-s
 
 ## ADR-021 — Soft delete: files move to `.trash/`
 Deleting a topping moves its file into `.trash/` inside the vault — Obsidian's own convention, so both apps share one trash — and the targeted rescan tombstones the row. Nothing in the app hard-deletes user bytes; recovery is moving the file back (a restore UI can come later). Write sites that delete must cancel any pending debounced save first, or the save resurrects the file.
+
+## ADR-022 — Durable identity lives in vault metadata, never paths or hashes
+Before Lists, duplication, publishing, managed sync, or sharing depend on it,
+every vault, folder, and topping receives a durable random ID persisted under
+`.waffle/`. Paths and content hashes remain reconciliation evidence only.
+Folder/topping identity must survive renames and full SQLite reconstruction; a
+duplicate receives a new ID. This closes the deliberate v1 scanner limitation
+where folder identity is path-derived and topping UUIDs exist only in the
+disposable mirror. Exact metadata layout and migration require the gate in
+docs/14 before scanner code changes.
+
+## ADR-023 — Accountless forever; managed personal and shared sync are E2EE
+Local Waffle requires no account. Authentication never implies upload: Sync,
+Share, and Publish are separate explicit ceremonies. Personal Sync transports
+end-to-end encrypted replicas while local files remain canonical. Shared
+folders remain server-homed under ADR-004, but the authoritative server state
+is ciphertext; granted member devices hold decryption keys and query local
+decrypted caches. Supabase RLS is defense in depth, not the plaintext boundary.
+Publishing deliberately creates a separate public projection. Key management,
+membership epochs, recovery, remote-only hydration, conflict/version protocol,
+and large-vault restore must pass docs/14's pre-implementation ADR/security
+gate.
+
+## ADR-024 — Experiences materialize existing primitives
+Beginner-facing experiences (Trip Planner, Wardrobe, Net Worth) are recipes
+that create ordinary property declarations, saved views, field mappings,
+Lists, and dashboards. They are not another storage or renderer engine.
+Suggestions are inert until accepted; accepted output belongs to the user and
+never silently tracks later inference. The advanced escape hatch is **+ Custom
+view**. Folder/view/List choice, Add, search scopes, and privacy rules are in
+docs/13.

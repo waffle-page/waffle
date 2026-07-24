@@ -1,11 +1,12 @@
 # Waffle 🧇
 
-A **local-first everything-library**. Folders hold **toppings** — notes, links, files, dashboards — each with a thumbnail, typed properties, and tags. Every folder renders through saved Airtable-style views: masonry, list, table, and more to come. Live personal data flows into datasets via sandboxed connectors. Discovery is built in.
+A **local-first everything-library**. Folders hold **toppings** — notes, links, files, dashboards — each with a thumbnail, typed properties, and tags. Every folder renders through saved Airtable-style views and purpose-shaped experiences: a trip can become a planner; a wardrobe can become a visual closet. Live personal data flows into datasets via sandboxed connectors. Discovery is built in.
 
 *Airtable for non-technical people, with Obsidian's soul and Pinterest's eyes.*
 
 - **Files are canonical.** Your vault is a normal folder: `.md` notes with YAML frontmatter, `.url` links, real files. Drop in an Obsidian vault and it just works; everything Waffle writes stays readable by Obsidian, Finder, and `grep`.
 - **Private by architecture.** The app is a PWA whose bundle carries no data and no secrets. Your library lives on your device; nothing leaves it without an explicit, visible choice.
+- **No account required.** Local Waffle is a permanent first-class mode. Signing in does not upload a vault; managed Sync, Share, and Publish are separate explicit actions.
 - **Typed properties without database jargon.** An "Airtable table" here is a view over notes — frontmatter keys become columns (`docs/12-notes-as-rows.md`).
 
 ## Status (2026-07-24)
@@ -54,6 +55,8 @@ pnpm dev        # opens the app; ?dev = dev-spine harness (seed 20k toppings, be
 | [docs/10-link-details.md](docs/10-link-details.md) | Typed link detail views |
 | [docs/11-lists.md](docs/11-lists.md) | Lists: curated many-to-many sequences, derived progress |
 | [docs/12-notes-as-rows.md](docs/12-notes-as-rows.md) | The user-tables doctrine |
+| [docs/13-experiences-and-suggestions.md](docs/13-experiences-and-suggestions.md) | Mini-app experiences, contextual suggestions, Add, search |
+| [docs/14-identity-sync-and-encryption.md](docs/14-identity-sync-and-encryption.md) | Durable identity, optional accounts, E2EE sharing, large-vault restore |
 | [docs/recipes/](docs/recipes/) | How to add a property type, a renderer, … |
 
 ## Monorepo layout
