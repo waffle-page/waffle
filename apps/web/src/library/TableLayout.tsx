@@ -28,11 +28,13 @@ import {
   type PropertyPatch,
   type TableOperationPlan,
 } from './tableOperations';
+import { useSessionHistory } from './sessionHistory';
 import { commitTableOperation, createEmptyNote, trashVaultFiles } from './vaultMutations';
 
 type PropMap = Map<string, Record<string, PropertyValue>>;
 
 function TableLayout({ items, groups, folderId = null, crossFolder = false, onOpen, onMutated, tableConfig, onTableConfig }: LayoutProps) {
+  const history = useSessionHistory();
   const [propMap, setPropMap] = useState<PropMap | null>(null);
   const [types, setTypes] = useState<PropertyTypes>({});
   const [dir, setDir] = useState<string | null>(null);
@@ -173,19 +175,26 @@ function TableLayout({ items, groups, folderId = null, crossFolder = false, onOp
     }
   };
 
-  const perform = (plan: TableOperationPlan, notice: string | null = null): void => {
+  const perform = (
+    plan: TableOperationPlan,
+    historyLabel: string,
+    notice: string | null = null,
+  ): void => {
     if (plan.patches.length > 0) patchOptimistically(optimisticPatchMap(plan.patches));
     if (plan.patches.length === 0 && plan.creates.length === 0) {
       setError(notice);
       return;
     }
     void run(async () => {
-      await commitTableOperation(await getVaultFs(), dir, plan);
+      await history.capture(
+        historyLabel,
+        async () => commitTableOperation(await getVaultFs(), dir, plan),
+      );
     }, notice);
   };
 
   const onEditCell = (id: string, key: string, value: PropertyValue | null): void => {
-    perform(planCellEdit(rowById.get(id), key, value));
+    perform(planCellEdit(rowById.get(id), key, value), 'Edit cell');
   };
 
   const onCreateRow = (title: string): void => {
@@ -199,7 +208,11 @@ function TableLayout({ items, groups, folderId = null, crossFolder = false, onOp
     if (!bulkKey) return;
     const key = bulkKey;
     const plan = planBulkEdit(rows, selected, key, value);
-    perform(plan, plan.skipped > 0 ? `${key}: skipped ${plan.skipped} read-only structured value${plan.skipped === 1 ? '' : 's'}.` : null);
+    perform(
+      plan,
+      'Edit selected cells',
+      plan.skipped > 0 ? `${key}: skipped ${plan.skipped} read-only structured value${plan.skipped === 1 ? '' : 's'}.` : null,
+    );
   };
 
   const applyBulkRaw = (): void => {
@@ -221,11 +234,11 @@ function TableLayout({ items, groups, folderId = null, crossFolder = false, onOp
   };
 
   const onClearCells = (cells: TableGridCell[]): void => {
-    perform(planClearCells(rowById, cells));
+    perform(planClearCells(rowById, cells), 'Clear cells');
   };
 
   const onFillDown = (cellRows: TableGridCell[][]): void => {
-    perform(planFillDown(rowById, columns, cellRows));
+    perform(planFillDown(rowById, columns, cellRows), 'Fill down');
   };
 
   const onColumnsChange = (next: TableColumnConfig[]): void => {
@@ -235,7 +248,7 @@ function TableLayout({ items, groups, folderId = null, crossFolder = false, onOp
   /** Selected-cell paste overwrites existing note rows, then creates overflow notes. */
   const onPasteCells = (anchor: TableGridCell, grid: string[][]): void => {
     const plan = planPasteAtAnchor({ anchor, grid, rows, columns, allowOverflow: dir !== null });
-    perform(plan, pasteNotice(plan.invalid));
+    perform(plan, 'Paste cells', pasteNotice(plan.invalid));
   };
 
   /** Spreadsheet paste → notes-as-rows (docs/12 applied to ingestion). */
@@ -250,7 +263,10 @@ function TableLayout({ items, groups, folderId = null, crossFolder = false, onOp
         setTypes(nextTypes);
         if (plan.columns) onTableConfig?.({ columns: plan.columns });
       }
-      await commitTableOperation(fs, dir, plan);
+      await history.capture(
+        'Append spreadsheet rows',
+        async () => commitTableOperation(fs, dir, plan),
+      );
     }, pasteNotice(plan.invalid));
   };
 
@@ -279,7 +295,10 @@ function TableLayout({ items, groups, folderId = null, crossFolder = false, onOp
     setConfirmDelete(false);
     setSelected(new Set<string>());
     void run(async () => {
-      await trashVaultFiles(await getVaultFs(), targets.map((target) => target.item.contentRef!));
+      await history.capture(
+        `Delete ${targets.length} item${targets.length === 1 ? '' : 's'}`,
+        async () => trashVaultFiles(await getVaultFs(), targets.map((target) => target.item.contentRef!)),
+      );
     });
   };
 

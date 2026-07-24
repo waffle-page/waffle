@@ -11,7 +11,9 @@ This is the executable specification for Waffle's table interaction quarantine:
 - `apps/web/src/library/tableOperations.ts` purely plans row-batched patches
   and note creation; every patch carries `before` and `after`.
 - `apps/web/src/library/vaultMutations.ts` executes file writes, rescans, and
-  soft deletes, returning receipts for the future undo history.
+  soft deletes, then replays stored receipts for undo/redo.
+- `apps/web/src/library/sessionHistory.tsx` owns the volatile undo/redo stacks,
+  replay exclusion, keyboard routing, and history error surface.
 - `apps/web/src/library/TableLayout.tsx` owns optimistic projection,
   pending-operation accounting, canonical requery, and table controls.
 
@@ -38,6 +40,20 @@ complete until this specification passes, along with typecheck and build.
 8. Busy state covers writes, rescans, and requeries. Intermediate refreshes
    must not replace newer optimistic patches; the last outstanding mutation
    reconciles the visible property map with the SQLite mirror.
+9. History records only after the file write and targeted rescan settle.
+   Undo/redo re-enters `vaultMutations`; React never applies inverse patches.
+10. A forward command in flight blocks replay. Concurrent commands enter the
+    undo stack in gesture-start order, regardless of I/O completion order.
+11. A successful new recorded command clears redo. Reload or active-vault
+    replacement clears both stacks; history is never persisted.
+12. Soft-delete replay uses the receipt's exact original/trash path pair. If
+    the destination is occupied, replay refuses to overwrite it and leaves the
+    entry at the stack head.
+13. Cmd/Ctrl+Z belongs to Waffle only outside native text controls and
+    CodeMirror. Inputs and the note editor retain their own document undo.
+14. Slice C reverses property patches and soft deletes. Overflow/ghost-row
+    note creation is not reversible; a mixed paste undoes its existing-row
+    property patches but does not trash the notes it created.
 
 ```mermaid
 flowchart LR
@@ -49,12 +65,14 @@ flowchart LR
     C --> W["vaultMutations: write file once"]
     W --> R["rescanFile"]
     R --> Q["TableLayout: requery in place"]
+    R --> H["sessionHistory: record receipt"]
+    H --> U["Undo/redo replay"]
+    U --> W
 ```
 
-This is also the Slice C insertion point: successful mutation receipts enter
-the session history after `vaultMutations` settles. Undo submits the receipt's
-inverse through the same command boundary; React components never manipulate
-history patches or vault bytes.
+The cycle is deliberate: forward and inverse commands share one canonical
+file-first path. The history layer orders receipts; it does not become a
+second mutation engine.
 
 ## Cell capabilities
 
@@ -279,7 +297,35 @@ Record the commit, browser, spreadsheet application, and fixture topping count.
 - Inspect the affected note frontmatter and busy state: one write per target
   row, no intermediate stale reconciliation.
 
-### 9. Regression surfaces
+### 9. Session undo/redo
+
+- Edit one cell. Confirm the Undo control names **Edit cell**; press Cmd/Ctrl+Z
+  and confirm the prior value returns after canonical requery.
+- Press Shift+Cmd/Ctrl+Z and confirm the edited value returns. Repeat the cycle
+  using the visible Undo/Redo controls.
+- Exercise bulk edit, range clear, fill-down, and paste onto existing rows.
+  Each logical gesture must occupy one history step even when it writes
+  several note files.
+- Undo twice, perform a new cell edit, and confirm Redo is no longer available.
+- Start editing a cell and press Cmd/Ctrl+Z while its native input has focus.
+  Confirm the draft changes locally and Waffle history does not move. Repeat
+  inside CodeMirror.
+- Delete a note from the table. Undo and confirm the exact `.trash/...` file
+  returns to its original path and the row reappears; redo and confirm the
+  same original/trash path pair is used.
+- Delete a note from the editor, then undo from the library. Confirm its
+  pending debounced save did not resurrect or overwrite the restored note.
+- After undoing a delete, create a file manually at the stored trash path and
+  attempt redo. Confirm Waffle refuses the collision, preserves both files,
+  surfaces an error, and leaves Redo available. Remove only that deliberate
+  collision fixture before continuing.
+- Paste across existing rows with overflow creation, then undo. Confirm
+  existing properties revert and the created notes remain; creation is
+  explicitly outside Slice C.
+- Reload the page and confirm both history controls reset. Never switch to a
+  real personal folder to test vault-reset behavior.
+
+### 10. Regression surfaces
 
 - Bulk-edit at least two selected note rows.
 - In the fixture's `dietary` list column, double-click a cell and confirm the
@@ -302,7 +348,7 @@ Record the commit, browser, spreadsheet application, and fixture topping count.
 - Sort and group; confirm cell selection reconciles safely.
 - Delete a row through the bulk-selection flow and confirm `.trash/` semantics.
 
-### 10. Twenty-thousand-row virtualization
+### 11. Twenty-thousand-row virtualization
 
 1. In `?dev`, select **Seed 20,000 toppings**.
 2. Return to the Table layout.
@@ -313,7 +359,7 @@ Record the commit, browser, spreadsheet application, and fixture topping count.
    survives.
 6. Clear seed data and rescan the fixture when finished.
 
-### 11. Accessibility
+### 12. Accessibility
 
 - Reach the grid and every operation above using the keyboard alone.
 - Confirm the active cell has a visible focus indicator.
@@ -342,5 +388,6 @@ Table acceptance:
 - Keyboard/screen-reader semantics: PASS|FAIL
 - Resize/reorder/sticky/migration: PASS|FAIL
 - Fill-down + row-batched writes: PASS|FAIL
+- Property/delete undo + redo/native-editor isolation/collision safety: PASS|FAIL
 - List edit/copy/paste/inference + unsupported-structure safety: PASS|FAIL
 ```

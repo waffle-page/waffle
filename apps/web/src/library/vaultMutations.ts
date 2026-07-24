@@ -17,7 +17,7 @@ import {
   type VaultFs,
 } from '@waffle/core';
 import { platform } from '../platform/instance';
-import { createNote, uniquePath } from './addFlows';
+import { createNote, exists, uniquePath } from './addFlows';
 import type { PlannedNoteCreate, PlannedNotePatch, PropertyPatch, TableOperationPlan } from './tableOperations';
 
 export interface TableMutationReceipt {
@@ -30,6 +30,12 @@ export interface TrashMutationReceipt {
   kind: 'trash';
   moves: Array<{ from: string; to: string }>;
 }
+
+export type VaultMutationReceipt = TableMutationReceipt | TrashMutationReceipt;
+export type ReplayableMutationReceipt =
+  | { kind: 'table'; patches: PlannedNotePatch[] }
+  | TrashMutationReceipt;
+export type ReplayDirection = 'undo' | 'redo';
 
 const queuesByVault = new WeakMap<VaultFs, Map<string, Promise<void>>>();
 
@@ -110,4 +116,60 @@ export async function trashVaultFiles(fs: VaultFs, paths: string[]): Promise<Tra
   const moves: TrashMutationReceipt['moves'] = [];
   for (const path of paths) moves.push(await trashFile(fs, path));
   return { kind: 'trash', moves };
+}
+
+/**
+ * Move a file to one exact inverse path without ever replacing an occupant.
+ *
+ * Session history stores both paths, so inventing a new target during replay
+ * would break redo identity. A collision instead freezes that replay entry:
+ * preserving an externally-created user file is more important than making
+ * the shortcut appear successful.
+ */
+async function replayMove(
+  fs: VaultFs,
+  from: string,
+  to: string,
+  canonicalPath: string,
+): Promise<void> {
+  if (await exists(fs, to)) {
+    throw new Error(`Cannot replay history because "${to}" already exists.`);
+  }
+  const bytes = await fs.read(from);
+  await fs.write(to, bytes);
+  await fs.remove(from);
+  // Trash is deliberately invisible to the scanner. Reindexing the original
+  // path therefore restores its row on undo and tombstones it again on redo.
+  await rescanFile(platform.db, fs, canonicalPath);
+}
+
+/**
+ * Replay only the mutation classes promised by Slice C.
+ *
+ * Table-created overflow notes are intentionally absent from the replayable
+ * receipt: the current contract covers property patches and soft deletes, not
+ * note creation. Undo runs row patches and trash moves in reverse order so a
+ * gesture's inverse is applied in the opposite order from its forward writes.
+ */
+export async function replayVaultMutation(
+  fs: VaultFs,
+  receipt: ReplayableMutationReceipt,
+  direction: ReplayDirection,
+): Promise<void> {
+  if (receipt.kind === 'table') {
+    const patches = direction === 'undo' ? [...receipt.patches].reverse() : receipt.patches;
+    for (const patch of patches) {
+      await writeNoteProperties(fs, patch.path, direction === 'undo' ? patch.before : patch.after);
+    }
+    return;
+  }
+
+  const moves = direction === 'undo' ? [...receipt.moves].reverse() : receipt.moves;
+  for (const move of moves) {
+    if (direction === 'undo') {
+      await replayMove(fs, move.to, move.from, move.from);
+    } else {
+      await replayMove(fs, move.from, move.to, move.from);
+    }
+  }
 }

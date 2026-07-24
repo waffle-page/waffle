@@ -18,6 +18,7 @@ import { NoteEditor } from '../editor/NoteEditor';
 import { LinkDetail } from '../editor/LinkDetail';
 import { findNoteByTitle } from '../editor/resolve';
 import { ImportDialog } from './ImportDialog';
+import { SessionHistoryProvider, useSessionHistoryController } from './sessionHistory';
 import { useLibraryViews } from './useLibraryViews';
 import { reconcileActiveVault } from './vaultLifecycle';
 import './TableLayout'; // registers the 'table' layout (same load-time pattern as @waffle/ui's entries)
@@ -69,6 +70,7 @@ export function Library() {
     setDefaultNamedView,
     renameNamedView,
   } = useLibraryViews();
+  const sessionHistory = useSessionHistoryController(refreshQuiet);
 
   const onOpenItem = (item: LibraryItem): void => {
     // Notes → editor. Links → detail view (docs/10). Files/dash open in later slices.
@@ -149,6 +151,7 @@ export function Library() {
   const onPickFolder = async (): Promise<void> => {
     try {
       const fs = await pickRealFolder();
+      sessionHistory.clear();
       setVaultFs(fs);
       markItemsLoading();
       await syncVault();
@@ -184,7 +187,7 @@ export function Library() {
   const sortValue = cfg?.sort.key === '$title' ? '$title' : cfg?.sort.key === '$updated' ? '$updated' : 'prop';
   const tableConfig: TableViewConfig = { columns: cfg?.columns, sort: cfg?.sort ?? null, groupBy: cfg?.groupBy ?? null };
 
-  return (
+  const screen = (
     <div style={{ display: 'flex', height: '100vh' }}>
       <aside style={{ width: 240, flexShrink: 0, borderRight: '1px solid var(--border)', background: 'var(--surface)', display: 'flex', flexDirection: 'column' }}>
         <div style={{ padding: '0.9rem 1rem 0.5rem', fontFamily: 'var(--font-head)', fontWeight: 700, fontSize: '1.05rem' }}>
@@ -210,8 +213,9 @@ export function Library() {
         </button>
         {fsAccessSupported() && (
           <button
+            disabled={sessionHistory.busy}
             onClick={() => void onPickFolder()}
-            style={{ margin: '0.5rem 0.75rem', padding: '0.4rem 0.6rem', fontSize: '0.78rem', background: 'var(--surface-2)', color: 'var(--text)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', cursor: 'pointer' }}
+            style={{ margin: '0.5rem 0.75rem', padding: '0.4rem 0.6rem', fontSize: '0.78rem', background: 'var(--surface-2)', color: 'var(--text)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', cursor: sessionHistory.busy ? 'default' : 'pointer', opacity: sessionHistory.busy ? 0.5 : 1 }}
           >
             Open folder…
           </button>
@@ -227,7 +231,30 @@ export function Library() {
         <header style={{ position: 'relative', display: 'flex', alignItems: 'center', gap: 12, padding: '0.75rem 1rem', borderBottom: '1px solid var(--border)' }}>
           <h1 style={{ fontSize: '1.05rem', margin: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{folderName}</h1>
           <span style={{ color: 'var(--text-dim)', fontSize: '0.8rem' }}>{items === null ? '…' : items.length.toLocaleString()}</span>
+          {sessionHistory.error && (
+            <span role="alert" style={{ color: 'var(--ink-blush)', fontSize: '0.75rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {sessionHistory.error}
+            </span>
+          )}
           <div style={{ marginLeft: 'auto', display: 'flex', gap: 6, alignItems: 'center' }}>
+            <button
+              aria-label={sessionHistory.undoLabel ? `Undo ${sessionHistory.undoLabel}` : 'Undo'}
+              title={sessionHistory.undoLabel ? `Undo ${sessionHistory.undoLabel} (Cmd/Ctrl+Z)` : 'Nothing to undo'}
+              disabled={!sessionHistory.canUndo}
+              onClick={() => void sessionHistory.undo()}
+              style={{ ...historyButtonStyle, cursor: sessionHistory.canUndo ? 'pointer' : 'default', opacity: sessionHistory.canUndo ? 1 : 0.45 }}
+            >
+              ↶
+            </button>
+            <button
+              aria-label={sessionHistory.redoLabel ? `Redo ${sessionHistory.redoLabel}` : 'Redo'}
+              title={sessionHistory.redoLabel ? `Redo ${sessionHistory.redoLabel} (Shift+Cmd/Ctrl+Z)` : 'Nothing to redo'}
+              disabled={!sessionHistory.canRedo}
+              onClick={() => void sessionHistory.redo()}
+              style={{ ...historyButtonStyle, cursor: sessionHistory.canRedo ? 'pointer' : 'default', opacity: sessionHistory.canRedo ? 1 : 0.45 }}
+            >
+              ↷
+            </button>
             <AddMenu onAdd={(action) => void onAdd(action)} />
             <button
               onClick={() => void openFilters()}
@@ -366,4 +393,24 @@ export function Library() {
       </main>
     </div>
   );
+
+  return (
+    <SessionHistoryProvider controller={sessionHistory}>
+      {screen}
+    </SessionHistoryProvider>
+  );
 }
+
+const historyButtonStyle: React.CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  width: 30,
+  height: 30,
+  padding: 0,
+  border: '1px solid var(--border)',
+  borderRadius: 'var(--radius-sm)',
+  background: 'var(--surface)',
+  color: 'var(--text-dim)',
+  fontSize: '1rem',
+};

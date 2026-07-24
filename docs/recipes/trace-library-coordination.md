@@ -8,6 +8,7 @@ view edit usually changes only local presentation config.
 | --- | --- |
 | Screen composition, dialogs, folder picker, add/drop flows | `apps/web/src/library/Library.tsx` |
 | Folder/view selection, view CRUD, row projection, quiet refresh | `apps/web/src/library/useLibraryViews.ts` |
+| Volatile mutation history, shortcut routing, replay exclusion | `apps/web/src/library/sessionHistory.tsx` |
 | Full scan → Obsidian sync → thumbnail pass | `apps/web/src/library/vaultLifecycle.ts` |
 | Readable SQL and local view-config persistence | `apps/web/src/library/queries.ts` |
 | Derived-view canonical `.base` writes | `apps/web/src/importer/baseWriteback.ts` |
@@ -47,6 +48,17 @@ flowchart LR
     T --> A["useLibraryViews.refreshAll"]
 ```
 
+Property/delete undo:
+
+```mermaid
+flowchart LR
+    G["Table/editor gesture"] --> M["vaultMutations: file → rescan"]
+    M --> H["sessionHistory: record receipt"]
+    H --> U["Undo/redo request"]
+    U --> M
+    M --> Q["useLibraryViews.refreshQuiet"]
+```
+
 ## Constraints
 
 1. `Library.tsx` does not write view config or query view rows directly.
@@ -60,6 +72,9 @@ flowchart LR
 5. A derived view write freezes in `baseWriteback` when Bases cannot express
    it. The controller may report the view as Waffle-owned, but must not coerce
    the canonical `.base`.
+6. `sessionHistory.tsx` orders receipts and excludes overlapping replay, but
+   never reads or writes vault bytes. Replay remains a `vaultMutations`
+   responsibility, and its successful file change precedes projection refresh.
 
 ## Manual acceptance
 
@@ -77,3 +92,6 @@ flowchart LR
    empty/loading state.
 6. Create a topping through Add and through drag/drop. Confirm the full vault
    lifecycle runs and the new item, Obsidian report, and thumbnail state agree.
+7. Edit a property and soft-delete a note. Undo/redo both through shortcuts and
+   controls; confirm each replay uses `refreshQuiet` without invoking a full
+   scan or flashing the table.

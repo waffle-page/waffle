@@ -75,7 +75,7 @@ pnpm dev        # app; append ?dev for the harness (seed 20k / clear seed / fixt
 - The seeder wipes ALL tables (deterministic benchmarks); `Clear seed data` is
   its surgical inverse and touches no vault rows.
 
-## Position (2026-07-23) and how to proceed
+## Position (2026-07-24) and how to proceed
 
 **P0 (spine) complete and verified.** P1 shipped so far: typed properties +
 declarations (`.waffle/properties.json`), the table layout (create-row-in-table,
@@ -125,7 +125,7 @@ projection, and no file write. The executable acceptance contract is
 **Focused orchestrator simplification complete:** table gestures now become
 pure before/after row plans in `tableOperations.ts`; `vaultMutations.ts` is the
 single table/soft-delete command boundary for file → rescan and returns the
-receipts Slice C will record; `TableLayout` owns only optimistic/pending/requery
+receipts session history records; `TableLayout` owns only optimistic/pending/requery
 coordination. `PropertyTable` delegates clipboard and column pointer sessions.
 `useLibraryViews.ts` now owns saved-view projection/persistence (including
 derived `.base` write-back), while `vaultLifecycle.ts` owns full scans,
@@ -133,15 +133,23 @@ Obsidian reconciliation, and thumbnails. The trace and manual acceptance live
 in `docs/recipes/verify-table-interactions.md` and
 `docs/recipes/trace-library-coordination.md`.
 
+**Slice C complete:** property edits (single, bulk, clear, fill, and existing-
+row paste) and soft deletes enter an in-memory session history only after their
+file-first command settles. Cmd/Ctrl+Z and Shift+Cmd/Ctrl+Z replay exact
+before/after patches or original/trash path pairs through `vaultMutations`;
+path collisions freeze safely instead of overwriting user files. Native inputs
+and CodeMirror retain their own undo. History resets on reload/vault
+replacement, and note creation remains explicitly outside the inverse surface.
+The stack/replay invariants and live procedure are in
+`docs/recipes/verify-table-interactions.md`.
+
 **Next, in agreed order:**
 
-1. **Table interaction slice C** — session undo/redo (inverse patches over
-   property writes; deletes un-trash by stored path).
-2. **P1 remainder**: status/ratings surfacing in library views (chips +
+1. **P1 remainder**: status/ratings surfacing in library views (chips +
    interaction filters), theme palette editor, Supabase auth, Capacitor shell
    (share extension), Tauri shell (native FS watching — replaces the
    per-write-site rescans with a real watcher), on-device Whisper.
-3. **P2 sharing opens with two distinct surfaces**: collaborative invite links
+2. **P2 sharing opens with two distinct surfaces**: collaborative invite links
    and unlisted public publishing for a single topping or folder. Public links
    are revocable, read-only projections with stable, crawler-fetchable
    Open Graph/Twitter Card images for WhatsApp and equivalent unfurlers. The

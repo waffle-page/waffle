@@ -8,7 +8,7 @@ A **local-first everything-library**. Folders hold **toppings** — notes, links
 - **Private by architecture.** The app is a PWA whose bundle carries no data and no secrets. Your library lives on your device; nothing leaves it without an explicit, visible choice.
 - **Typed properties without database jargon.** An "Airtable table" here is a view over notes — frontmatter keys become columns (`docs/12-notes-as-rows.md`).
 
-## Status (2026-07-23)
+## Status (2026-07-24)
 
 **P0 — the spine — is complete and verified**: SQLite (OPFS) index over a real vault, virtualized masonry/grid/list smooth at 20k items, thumbnail pipeline, CodeMirror editor with Obsidian-style live preview, add flows.
 
@@ -22,10 +22,12 @@ A **local-first everything-library**. Folders hold **toppings** — notes, links
 - **Soft delete** to `.trash/` (ADR-021) from table selection and the editor.
 - **Bidirectional Obsidian config sync** (ADR-020): `types.json` and `.base` files sync at every scan; table/cards/list views, directional grouping, recursive negation, and representable `file.*` predicates round-trip through comment-preserving YAML surgery; inexpressible states freeze safely.
 - **Traceable mutation/view boundaries**: table gestures plan one before/after patch per note, one command boundary performs file → rescan, and saved-view persistence is separate from full vault reconciliation.
+- **Session undo/redo**: property gestures and soft deletes replay through that
+  same file-first command boundary; exact trash paths restore without
+  overwriting collisions, while native editor undo remains isolated.
 
-**Next** (working agreements in [CLAUDE.md](CLAUDE.md)): table interaction
-slice C — in-memory session undo/redo for property writes and soft deletes —
-then the P1 remainder.
+**Next** (working agreements in [CLAUDE.md](CLAUDE.md)): status/ratings
+surfacing in library views, then the remaining P1 queue.
 Phase ladder: `docs/04-phases.md`.
 
 ## Try it

@@ -16,6 +16,7 @@ import { EditorView, basicSetup } from 'codemirror';
 import { markdown } from '@codemirror/lang-markdown';
 import { rescanFile } from '@waffle/core';
 import { getVaultFs, platform } from '../platform/instance';
+import { useSessionHistory } from '../library/sessionHistory';
 import { trashVaultFiles } from '../library/vaultMutations';
 import { vaultUrl, mimeFor } from './assetUrl';
 import { livePreview } from './livePreview';
@@ -44,6 +45,7 @@ export function NoteEditor({
   onClose: () => void;
   onNavigate: (wikilinkName: string) => void;
 }) {
+  const history = useSessionHistory();
   const hostRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
   const textRef = useRef('');
@@ -94,9 +96,16 @@ export function NoteEditor({
       saveTimerRef.current = null;
     }
     setDirty(false);
-    const fs = await getVaultFs();
-    await trashVaultFiles(fs, [path]);
-    onClose();
+    try {
+      await history.capture(
+        'Delete note',
+        async () => trashVaultFiles(await getVaultFs(), [path]),
+      );
+      onClose();
+    } catch (error) {
+      setConfirmDelete(false);
+      setNotice(error instanceof Error ? error.message : String(error));
+    }
   };
 
   /** Flush any pending debounced save, then leave — the host refreshes on close. */
