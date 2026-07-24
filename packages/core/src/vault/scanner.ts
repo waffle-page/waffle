@@ -11,6 +11,8 @@
  *  - Disappeared files tombstone (deleted_at), never hard-delete.
  *  - Only rows with source='vault' are touched — seeded/app-created rows are
  *    someone else's (the store layer's) responsibility.
+ *  - URL entity refs derive from URL bytes, never the `.url` carrier's file
+ *    hash; personal interaction overlays must survive carrier-file renames.
  *
  * v1 limits, on purpose (see docs/04-phases.md deferred list):
  *  - Watcher events trigger a full rescan (debounced by the caller); targeted
@@ -22,7 +24,7 @@
  */
 import type { SqlDriver, ToppingType, VaultFs } from '../types';
 import { parseNote, toEavColumns } from './frontmatter';
-import { contentHash, folderIdFor } from './hash';
+import { contentHash, folderIdFor, urlEntityKey } from './hash';
 import { loadPropertyTypes } from './propertyTypes';
 
 export interface ScanResult {
@@ -45,6 +47,7 @@ const basename = (path: string): string => path.split('/').pop()!;
 
 interface FsFile { path: string; size: number; mtime: number }
 interface Existing { id: string; folder_id: string; content_ref: string; content_hash: string | null }
+interface EntityRef { topping_id: string; entity_key: string }
 
 export async function scanVault(db: SqlDriver, fs: VaultFs): Promise<ScanResult> {
   const t0 = performance.now();
@@ -73,6 +76,7 @@ export async function scanVault(db: SqlDriver, fs: VaultFs): Promise<ScanResult>
     hash: string;
     note: ReturnType<typeof parseNote> | null;
     url: string | null;
+    entityKey: string | null;
   }
   const extracted: ExtractedFile[] = [];
   for (const f of files) {
@@ -82,7 +86,8 @@ export async function scanVault(db: SqlDriver, fs: VaultFs): Promise<ScanResult>
     const hash = bytes ? await contentHash(bytes) : `big:${f.size}:${f.mtime}`;
     const note = type === 'note' && bytes ? parseNote(new TextDecoder().decode(bytes), types) : null;
     const url = type === 'link' && bytes ? extractUrl(new TextDecoder().decode(bytes)) : null;
-    extracted.push({ ...f, type, hash, note, url });
+    const entityKey = url ? await urlEntityKey(url) : null;
+    extracted.push({ ...f, type, hash, note, url, entityKey });
   }
 
   const result: ScanResult = { files: files.length, folders: dirs.length, added: 0, updated: 0, moved: 0, tombstoned: 0, unchanged: 0, ms: 0 };
@@ -101,6 +106,12 @@ export async function scanVault(db: SqlDriver, fs: VaultFs): Promise<ScanResult>
       `SELECT id, folder_id, content_ref, content_hash FROM toppings WHERE source = 'vault' AND deleted_at IS NULL`,
     );
     const byPath = new Map(existing.map((r) => [r.content_ref, r]));
+    // One read lets unchanged files avoid thousands of no-op UPSERTs while
+    // still backfilling the derived table after migration v5.
+    const entityRefs = await db.exec<EntityRef>(
+      `SELECT topping_id, entity_key FROM topping_entities WHERE entity_kind = 'url'`,
+    );
+    const entityByTopping = new Map(entityRefs.map((ref) => [ref.topping_id, ref.entity_key]));
     const byHash = new Map<string, Existing[]>();
     for (const r of existing) {
       if (!r.content_hash) continue;
@@ -118,6 +129,9 @@ export async function scanVault(db: SqlDriver, fs: VaultFs): Promise<ScanResult>
       const atPath = byPath.get(f.path);
 
       if (atPath && atPath.content_hash === f.hash) {
+        if ((entityByTopping.get(atPath.id) ?? null) !== f.entityKey) {
+          await replaceUrlEntityRef(db, atPath.id, f.entityKey);
+        }
         // Self-heal: folder_id derives from the path — if it drifted (bug, or a
         // future folder-id scheme change), quietly correct it.
         if (atPath.folder_id !== folderId) {
@@ -148,6 +162,9 @@ export async function scanVault(db: SqlDriver, fs: VaultFs): Promise<ScanResult>
       const candidate = (byHash.get(f.hash) ?? []).find((r) => !fsPaths.has(r.content_ref) && !seenIds.has(r.id));
       if (candidate) {
         await db.exec(`UPDATE toppings SET content_ref = ?, folder_id = ?, title = ?, updated_at = ? WHERE id = ?`, [f.path, folderId, title, mtimeIso, candidate.id]);
+        if ((entityByTopping.get(candidate.id) ?? null) !== f.entityKey) {
+          await replaceUrlEntityRef(db, candidate.id, f.entityKey);
+        }
         result.moved++;
         seenIds.add(candidate.id);
         continue;
@@ -208,16 +225,22 @@ export async function rescanFile(db: SqlDriver, fs: VaultFs, path: string): Prom
     }
 
     const hash = await contentHash(bytes);
-    if (existing && existing.content_hash === hash) return;
-
-    const types = await loadPropertyTypes(fs);
     const type = typeFor(path);
     const text = new TextDecoder().decode(bytes);
+    const url = type === 'link' ? extractUrl(text) : null;
+    const entityKey = url ? await urlEntityKey(url) : null;
+    if (existing && existing.content_hash === hash) {
+      await replaceUrlEntityRef(db, existing.id, entityKey);
+      return;
+    }
+
+    const types = await loadPropertyTypes(fs);
     const f = {
       type,
       path,
       note: type === 'note' ? parseNote(text, types) : null,
-      url: type === 'link' ? extractUrl(text) : null,
+      url,
+      entityKey,
     };
     const title = basename(path).replace(/\.[^.]+$/, '');
 
@@ -259,11 +282,12 @@ function extractUrl(text: string): string | null {
 async function writeExtras(
   db: SqlDriver,
   toppingId: string,
-  f: { type: ToppingType; path: string; note: ReturnType<typeof parseNote> | null; url: string | null },
+  f: { type: ToppingType; path: string; note: ReturnType<typeof parseNote> | null; url: string | null; entityKey: string | null },
 ): Promise<void> {
   await db.exec(`DELETE FROM properties WHERE topping_id = ?`, [toppingId]);
   await db.exec(`DELETE FROM topping_tags WHERE topping_id = ?`, [toppingId]);
   await db.exec(`DELETE FROM toppings_fts WHERE topping_id = ?`, [toppingId]);
+  await replaceUrlEntityRef(db, toppingId, f.entityKey);
 
   const title = f.path.split('/').pop()!.replace(/\.[^.]+$/, '');
 
@@ -295,5 +319,18 @@ async function writeExtras(
   await db.exec(
     `INSERT INTO toppings_fts (topping_id, title, body, tags) VALUES (?,?,?,?)`,
     [toppingId, title, f.note.body.slice(0, MAX_FTS_BODY), f.note.tags.join(' ')],
+  );
+}
+
+/** Replace only the scanner-owned URL projection; other entity kinds have separate ingesters. */
+async function replaceUrlEntityRef(db: SqlDriver, toppingId: string, entityKey: string | null): Promise<void> {
+  if (entityKey === null) {
+    await db.exec(`DELETE FROM topping_entities WHERE topping_id = ? AND entity_kind = 'url'`, [toppingId]);
+    return;
+  }
+  await db.exec(
+    `INSERT INTO topping_entities (topping_id, entity_kind, entity_key) VALUES (?,'url',?)
+     ON CONFLICT(topping_id, entity_kind) DO UPDATE SET entity_key = excluded.entity_key`,
+    [toppingId, entityKey],
   );
 }

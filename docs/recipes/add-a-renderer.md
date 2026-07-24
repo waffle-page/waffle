@@ -26,6 +26,11 @@ function BoardLayout({ items, loadThumb, onOpen }: LayoutProps) { ... }
 them in pure renderers. After any write your layout initiates, call
 `onMutated` so the host swaps in fresh rows.
 
+`LibraryItem.interactionMarks` already contains the current owner's
+presentation-ready status labels and ratings. Render it with
+`InteractionBadges` where the layout has room; never query interactions or
+derive entity identity inside a renderer.
+
 Virtualize anything unbounded: `@tanstack/react-virtual` via `VirtualList` /
 `VirtualGrid` / `VirtualMasonry`, or directly (see `PropertyTable`). Tokens
 only — no raw colors.

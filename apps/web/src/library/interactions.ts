@@ -1,8 +1,8 @@
 /**
- * Personal marks (docs/09): status + rating, keyed to the ENTITY (canonical-URL
- * hash for links) — one status per set per entity, private always.
+ * Personal marks (docs/09): status + rating, keyed to the ENTITY (v1:
+ * trimmed-URL hash for links) — one status per set per entity, private always.
  */
-import { contentHash, fromEavColumns } from '@waffle/core';
+import { fromEavColumns, urlEntityKey } from '@waffle/core';
 import { formatProperty } from '@waffle/ui';
 import { platform } from '../platform/instance';
 
@@ -17,11 +17,6 @@ export interface EntityMarks {
   set: StatusSet;
   slot: string | null;
   rating: number | null;
-}
-
-/** Canonical entity key for a URL (v1: hash of the trimmed URL string). */
-export async function urlEntityKey(url: string): Promise<string> {
-  return contentHash(new TextEncoder().encode(url.trim()));
 }
 
 /** Resolve which status set applies: schema_type binding, else the generic 'do'. */

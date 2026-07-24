@@ -11,7 +11,11 @@ import type { GroupByConfig } from './types';
 /** Built-in `$…` field or frontmatter property key. */
 export interface FilterField {
   key: string;
-  kind: PropertyValue['kind'] | 'title' | 'type' | 'tag';
+  kind: PropertyValue['kind'] | 'title' | 'type' | 'tag' | 'interaction-status' | 'interaction-rating';
+  /** Beginner-facing name for built-ins; property keys fall back to themselves. */
+  label?: string;
+  /** Fixed vocabulary for semantic fields such as interaction status. */
+  options?: Array<{ value: string; label: string }>;
 }
 
 export interface FilterCondition {
@@ -47,11 +51,13 @@ const OPS: Record<string, Array<{ cmp: FilterCondition['cmp']; label: string }>>
   duration: [{ cmp: 'lt', label: '<' }, { cmp: 'gte', label: '≥' }],
   date: [{ cmp: 'gte', label: 'on or after' }, { cmp: 'lt', label: 'before' }],
   checkbox: [{ cmp: 'eq', label: 'is' }],
+  'interaction-status': [{ cmp: 'eq', label: 'is' }, { cmp: 'ne', label: 'is not' }],
+  'interaction-rating': [{ cmp: 'eq', label: '=' }, { cmp: 'ne', label: '≠' }, { cmp: 'lt', label: '<' }, { cmp: 'lte', label: '≤' }, { cmp: 'gt', label: '>' }, { cmp: 'gte', label: '≥' }],
 };
 
 /** Raw input string → typed condition value for the field's kind. */
 function typedValue(kind: FilterField['kind'], raw: string): string | number | boolean | null {
-  if (kind === 'number' || kind === 'money' || kind === 'duration') {
+  if (kind === 'number' || kind === 'money' || kind === 'duration' || kind === 'interaction-rating') {
     const n = Number(raw);
     return Number.isNaN(n) ? null : n;
   }
@@ -77,6 +83,13 @@ interface DraftRow {
 
 const ctl: CSSProperties = { background: 'var(--surface)', color: 'var(--text)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '0.25rem 0.45rem', fontSize: '0.8rem' };
 
+function defaultRaw(field: FilterField): string {
+  if (field.options?.[0]) return field.options[0].value;
+  if (field.kind === 'checkbox') return 'true';
+  if (field.kind === 'type') return 'note';
+  return '';
+}
+
 export function FilterPopover({ fields, conditions, filtersReadOnly = false, groupBy, groupChoices, showGroupBy = true, onApply, onClose }: FilterPopoverProps) {
   const [rows, setRows] = useState<DraftRow[]>(() =>
     conditions.map((c) => ({ key: c.key, cmp: c.cmp, raw: rawValue(fields.find((f) => f.key === c.key)?.kind ?? 'text', c.value) })),
@@ -98,7 +111,7 @@ export function FilterPopover({ fields, conditions, filtersReadOnly = false, gro
     setRows((prev) => prev.map((r, j) => (j === i ? { ...r, ...patch } : r)));
 
   return (
-    <div style={{ position: 'absolute', top: '100%', right: 8, zIndex: 6, display: 'flex', flexDirection: 'column', gap: 8, width: 430, maxWidth: '90vw', padding: '0.75rem', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', boxShadow: 'var(--shadow-menu)' }}>
+    <div role="dialog" aria-label="View filters" style={{ position: 'absolute', top: '100%', right: 8, zIndex: 6, display: 'flex', flexDirection: 'column', gap: 8, width: 430, maxWidth: '90vw', padding: '0.75rem', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', boxShadow: 'var(--shadow-menu)' }}>
       <strong style={{ fontSize: '0.82rem' }}>Filter</strong>
       {filtersReadOnly && (
         <span style={{ fontSize: '0.78rem', color: 'var(--text-dim)' }}>
@@ -111,33 +124,41 @@ export function FilterPopover({ fields, conditions, filtersReadOnly = false, gro
         const ops = OPS[kind] ?? OPS.text!;
         return (
           <div key={i} style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-            <select value={r.key} onChange={(e) => { const key = e.target.value; setRow(i, { key, cmp: (OPS[fieldFor(key).kind] ?? OPS.text!)[0]!.cmp, raw: '' }); }} style={{ ...ctl, width: 120 }}>
+            <select aria-label="Filter field" value={r.key} onChange={(e) => { const key = e.target.value; const field = fieldFor(key); setRow(i, { key, cmp: (OPS[field.kind] ?? OPS.text!)[0]!.cmp, raw: defaultRaw(field) }); }} style={{ ...ctl, width: 120 }}>
               {fields.map((f) => (
-                <option key={f.key} value={f.key}>{f.key === '$title' ? 'Title' : f.key === '$type' ? 'Type' : f.key === '$tag' ? 'Tag' : f.key}</option>
+                <option key={f.key} value={f.key}>{f.label ?? (f.key === '$title' ? 'Title' : f.key === '$type' ? 'Type' : f.key === '$tag' ? 'Tag' : f.key)}</option>
               ))}
             </select>
-            <select value={r.cmp} onChange={(e) => setRow(i, { cmp: e.target.value as FilterCondition['cmp'] })} style={{ ...ctl, width: 110 }}>
+            <select aria-label="Filter operator" value={r.cmp} onChange={(e) => setRow(i, { cmp: e.target.value as FilterCondition['cmp'] })} style={{ ...ctl, width: 110 }}>
               {ops.map((o) => (
                 <option key={o.cmp} value={o.cmp}>{o.label}</option>
               ))}
             </select>
-            {kind === 'checkbox' ? (
-              <select value={r.raw || 'true'} onChange={(e) => setRow(i, { raw: e.target.value })} style={{ ...ctl, flex: 1 }}>
+            {fieldFor(r.key).options ? (
+              <select aria-label="Filter value" value={r.raw || fieldFor(r.key).options![0]?.value || ''} onChange={(e) => setRow(i, { raw: e.target.value })} style={{ ...ctl, flex: 1 }}>
+                {fieldFor(r.key).options!.map((option) => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
+              </select>
+            ) : kind === 'checkbox' ? (
+              <select aria-label="Filter value" value={r.raw || 'true'} onChange={(e) => setRow(i, { raw: e.target.value })} style={{ ...ctl, flex: 1 }}>
                 <option value="true">checked</option>
                 <option value="false">unchecked</option>
               </select>
             ) : kind === 'type' ? (
-              <select value={r.raw || 'note'} onChange={(e) => setRow(i, { raw: e.target.value })} style={{ ...ctl, flex: 1 }}>
+              <select aria-label="Filter value" value={r.raw || 'note'} onChange={(e) => setRow(i, { raw: e.target.value })} style={{ ...ctl, flex: 1 }}>
                 {['note', 'link', 'file', 'dash'].map((t) => (
                   <option key={t} value={t}>{t}</option>
                 ))}
               </select>
             ) : (
               <input
+                aria-label="Filter value"
                 value={r.raw}
                 onChange={(e) => setRow(i, { raw: e.target.value })}
                 onKeyDown={(e) => e.key === 'Enter' && apply()}
                 type={kind === 'number' || kind === 'money' || kind === 'duration' ? 'number' : kind === 'date' ? 'date' : 'text'}
+                inputMode={kind === 'interaction-rating' ? 'decimal' : undefined}
                 placeholder="value"
                 style={{ ...ctl, flex: 1, minWidth: 0 }}
               />
@@ -155,6 +176,7 @@ export function FilterPopover({ fields, conditions, filtersReadOnly = false, gro
         <div style={{ display: 'flex', gap: 6, alignItems: 'center', borderTop: '1px solid var(--border)', paddingTop: 8 }}>
           <span style={{ fontSize: '0.8rem', color: 'var(--text-dim)' }}>Group by</span>
           <select
+            aria-label="Group by field"
             value={group?.key ?? ''}
             onChange={(e) => setGroup(e.target.value ? { key: e.target.value, dir: group?.dir ?? 'asc' } : null)}
             style={{ ...ctl, flex: 1 }}
@@ -165,7 +187,7 @@ export function FilterPopover({ fields, conditions, filtersReadOnly = false, gro
             ))}
           </select>
           {group && (
-            <select value={group.dir} onChange={(e) => setGroup({ ...group, dir: e.target.value as GroupByConfig['dir'] })} style={ctl}>
+            <select aria-label="Group direction" value={group.dir} onChange={(e) => setGroup({ ...group, dir: e.target.value as GroupByConfig['dir'] })} style={ctl}>
               <option value="asc">ascending</option>
               <option value="desc">descending</option>
             </select>

@@ -55,7 +55,7 @@ export async function seed(db: SqlDriver, onProgress: (label: string) => void): 
 
   await db.transaction(async () => {
     onProgress('clearing previous data');
-    for (const table of ['view_order', 'views', 'topping_tags', 'tags', 'properties', 'toppings', 'folders']) {
+    for (const table of ['view_order', 'views', 'topping_entities', 'topping_tags', 'tags', 'properties', 'toppings', 'folders']) {
       await db.exec(`DELETE FROM ${table}`);
     }
     await db.exec(`DELETE FROM toppings_fts`);

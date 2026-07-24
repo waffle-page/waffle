@@ -1,5 +1,16 @@
 import type { ToppingType } from '@waffle/core';
 
+export type InteractionSlot = 'queued' | 'active' | 'done' | 'dropped';
+
+/** Presentation-ready personal mark; private overlay data, never a shared property. */
+export interface InteractionMark {
+  setId: string;
+  setName: string;
+  slot: InteractionSlot | null;
+  statusLabel: string | null;
+  rating: number | null;
+}
+
 /** What a layout renderer receives per item — presentation-ready, no DB access. */
 export interface LibraryItem {
   id: string;
@@ -15,6 +26,8 @@ export interface LibraryItem {
   thumbRef?: string | null;
   thumbColor?: string | null;
   aspect?: number | null;
+  /** Personal per-entity overlays already resolved by the host query. */
+  interactionMarks?: InteractionMark[];
 }
 
 /** Resolves a topping's thumbnail to a displayable URL (platform-owned). */

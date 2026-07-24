@@ -7,6 +7,7 @@
 import { useMemo, type ComponentType } from 'react';
 import type { GroupSection, LibraryItem, TableViewConfig, ThumbLoader } from './types';
 import { isOpenable, ToppingCard } from './ToppingCard';
+import { InteractionBadges } from './InteractionBadges';
 import { VirtualGrid } from './VirtualGrid';
 import { VirtualList } from './VirtualList';
 import { VirtualMasonry } from './VirtualMasonry';
@@ -94,7 +95,8 @@ function ListLayout({ items, groups, onOpen }: LayoutProps) {
             style={{ display: 'flex', alignItems: 'center', gap: 12, height: '100%', borderBottom: '1px solid var(--border)', cursor: open ? 'pointer' : 'default' }}
           >
             <Icon style={{ color: 'var(--text-dim)', fontSize: '1.1rem', flexShrink: 0 }} />
-            <span style={{ fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{item.title}</span>
+            <span style={{ minWidth: 0, fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{item.title}</span>
+            <InteractionBadges marks={item.interactionMarks} />
             <span style={{ color: 'var(--text-dim)', fontSize: '0.8rem', marginLeft: 'auto', whiteSpace: 'nowrap' }}>
               {item.subtitle ?? item.type}
             </span>

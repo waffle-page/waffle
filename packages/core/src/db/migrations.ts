@@ -159,7 +159,7 @@ CREATE TABLE connector_state (
     version: 2,
     name: 'status_and_ratings',
     // Personal marks layer (docs/09-status-and-ratings.md): per-owner status +
-    // rating keyed to the ENTITY (canonical-URL hash), not the topping — one
+    // rating keyed to the ENTITY (v1: trimmed-URL hash), not the topping — one
     // status per book no matter how many folders it's saved in, and you can
     // rate things you never saved. Private always; never syncs into shared folders.
     sql: `
@@ -179,7 +179,7 @@ CREATE TABLE status_set_bindings (
 CREATE TABLE interactions (
   owner_id    TEXT NOT NULL DEFAULT 'local',
   entity_kind TEXT NOT NULL DEFAULT 'url', -- 'url' now; extensible (ADR: rate anything)
-  entity_key  TEXT NOT NULL,               -- canonical-URL hash (= toppings.content_hash for links)
+  entity_key  TEXT NOT NULL,               -- trimmed-URL hash; never the carrier file's content_hash
   set_id      TEXT REFERENCES status_sets(id),
   slot        TEXT CHECK (slot IN ('queued','active','done','dropped')),
   rating      REAL,                        -- canonical 0-10; display maps to user preference
@@ -246,6 +246,23 @@ INSERT INTO interactions_v4
 DROP TABLE interactions;
 ALTER TABLE interactions_v4 RENAME TO interactions;
 CREATE INDEX idx_interactions_slot ON interactions(owner_id, slot);
+`,
+  },
+  {
+    version: 5,
+    name: 'topping_entity_refs',
+    // Interactions belong to entities, while library rows belong to vault
+    // files. This disposable mapping lets SQL join the two without ever
+    // confusing a `.url` carrier-file hash with its trimmed-URL entity hash.
+    sql: `
+CREATE TABLE topping_entities (
+  topping_id  TEXT NOT NULL REFERENCES toppings(id) ON DELETE CASCADE,
+  entity_kind TEXT NOT NULL,
+  entity_key  TEXT NOT NULL,
+  PRIMARY KEY (topping_id, entity_kind)
+);
+CREATE INDEX idx_topping_entities_identity
+  ON topping_entities(entity_kind, entity_key);
 `,
   },
 ];

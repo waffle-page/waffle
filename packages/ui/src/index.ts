@@ -6,6 +6,8 @@ export {
   normalizeTableColumnWidth,
   type GroupByConfig,
   type GroupSection,
+  type InteractionMark,
+  type InteractionSlot,
   type LibraryItem,
   type TableColumnConfig,
   type TableViewConfig,
@@ -17,6 +19,7 @@ export { PropertyCell, formatProperty, parseCellInput, EDITABLE_KINDS, type Cell
 export { ViewTabs, type ViewTabInfo, type ViewTabsProps } from './ViewTabs';
 export { FilterPopover, type FilterField, type FilterCondition, type FilterPopoverProps } from './FilterPopover';
 export { ToppingCard, clampAspect } from './ToppingCard';
+export { InteractionBadges } from './InteractionBadges';
 export { VirtualGrid } from './VirtualGrid';
 export { VirtualList } from './VirtualList';
 export { VirtualMasonry } from './VirtualMasonry';

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import type { ToppingType } from '@waffle/core';
 import type { LibraryItem, ThumbLoader } from './types';
 import { DashIcon, FileIcon, LinkIcon, NoteIcon } from './icons';
+import { InteractionBadges } from './InteractionBadges';
 
 /** Default type→ramp assignment (user-remappable later, docs/02 → Theming). */
 const HUE: Record<ToppingType, string> = {
@@ -89,6 +90,7 @@ export function ToppingCard({
         style={{
           flex: 1,
           minHeight: 0,
+          position: 'relative',
           background: item.thumbColor ?? `var(--ramp-${hue})`,
           color: `var(--ink-${hue})`,
           display: 'flex',
@@ -102,6 +104,9 @@ export function ToppingCard({
         ) : item.thumbColor ? null : (
           <Icon />
         )}
+        <span style={{ position: 'absolute', left: 6, right: 6, bottom: 6, display: 'flex', minWidth: 0 }}>
+          <InteractionBadges marks={item.interactionMarks} />
+        </span>
       </div>
       <div style={{ height: CARD_META_H - 2, boxSizing: 'border-box', padding: '0.4rem 0.65rem', overflow: 'hidden' }}>
         <div style={{ fontFamily: 'var(--font-head)', fontWeight: 600, fontSize: '0.85rem', lineHeight: '1.15rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>

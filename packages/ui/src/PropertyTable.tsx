@@ -42,6 +42,7 @@ import {
   type TableGridProjection,
 } from './tableGridState';
 import { isOpenable } from './ToppingCard';
+import { InteractionBadges } from './InteractionBadges';
 import { DashIcon, FileIcon, LinkIcon, NoteIcon, PlusIcon } from './icons';
 import { parseClipboardTsv, propertyToTsv } from './tableClipboard';
 import { useTableColumnInteractions } from './useTableColumnInteractions';
@@ -593,7 +594,8 @@ export function PropertyTable({
                   }}
                 >
                   <Icon style={{ color: 'var(--text-dim)', flexShrink: 0 }} />
-                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{row.item.title}</span>
+                  <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>{row.item.title}</span>
+                  <InteractionBadges marks={row.item.interactionMarks} />
                 </div>
                 {columns.map((column, propertyIndex) => {
                   const cell: TableGridCell = { rowId: row.item.id, columnKey: column.key };

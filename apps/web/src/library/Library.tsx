@@ -39,6 +39,13 @@ const filterCount = (filters: FilterNode | null): number =>
 const toFilterNode = (conditions: FilterCondition[]): FilterNode | null =>
   conditions.length === 0 ? null : { op: 'and', children: conditions.map((c) => ({ op: 'cmp' as const, key: c.key, cmp: c.cmp, value: c.value })) };
 
+const INTERACTION_STATUS_OPTIONS = [
+  { value: 'queued', label: 'Queued / want to' },
+  { value: 'active', label: 'Active / in progress' },
+  { value: 'done', label: 'Done' },
+  { value: 'dropped', label: 'Dropped' },
+];
+
 export function Library() {
   const [status, setStatus] = useState<PlatformStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -187,6 +194,8 @@ export function Library() {
         { key: '$folder', kind: 'text' },
         { key: '$ext', kind: 'text' },
         { key: '$updated', kind: 'date' },
+        { key: '$interaction.status', kind: 'interaction-status', label: 'My status', options: INTERACTION_STATUS_OPTIONS },
+        { key: '$interaction.rating', kind: 'interaction-rating', label: 'My rating' },
         ...props.map((p) => ({ key: p.key, kind: p.kind })),
       ]);
     }
@@ -327,7 +336,7 @@ export function Library() {
               conditions={toConditions(cfg.filters)}
               filtersReadOnly={!filtersAreEditable(cfg.filters)}
               groupBy={cfg.groupBy}
-              groupChoices={fields.filter((f) => f.key !== '$tag').map((f) => f.key)}
+              groupChoices={fields.filter((f) => f.key !== '$tag' && f.kind !== 'interaction-status' && f.kind !== 'interaction-rating').map((f) => f.key)}
               showGroupBy={!!layout.groupable}
               onApply={(conditions, groupBy) => {
                 setFilterOpen(false);
@@ -396,7 +405,19 @@ export function Library() {
               onNavigate={(name) => void onNavigateWikilink(name)}
             />
           )}
-          {openLink && <LinkDetail key={openLink.item.id} item={openLink.item} url={openLink.url} onClose={() => setOpenLink(null)} />}
+          {openLink && (
+            <LinkDetail
+              key={openLink.item.id}
+              item={openLink.item}
+              url={openLink.url}
+              onClose={() => {
+                setOpenLink(null);
+                // Marks live outside topping properties; refresh the active
+                // projection so badges and interaction filters change together.
+                void refreshQuiet();
+              }}
+            />
+          )}
           {importOpen && (
             <ImportDialog
               onClose={() => setImportOpen(false)}

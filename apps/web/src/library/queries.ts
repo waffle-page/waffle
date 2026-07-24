@@ -9,6 +9,8 @@ import {
   normalizeTableColumnWidth,
   type GroupByConfig,
   type GroupSection,
+  type InteractionMark,
+  type InteractionSlot,
   type LibraryItem,
   type TableColumnConfig,
 } from '@waffle/ui';
@@ -280,6 +282,59 @@ function filterSql(node: FilterNode, params: unknown[]): string {
     params.push(String(node.value));
     return `t.type = ?`;
   }
+  if (node.key === '$interaction.status') {
+    params.push(String(node.value));
+    if (node.cmp === 'ne') {
+      return `EXISTS (
+        SELECT 1
+        FROM topping_entities te
+        JOIN interactions i
+          ON i.entity_kind = te.entity_kind AND i.entity_key = te.entity_key
+        WHERE te.topping_id = t.id AND i.owner_id = 'local' AND i.slot IS NOT NULL
+      ) AND NOT EXISTS (
+        SELECT 1
+        FROM topping_entities te
+        JOIN interactions i
+          ON i.entity_kind = te.entity_kind AND i.entity_key = te.entity_key
+        WHERE te.topping_id = t.id AND i.owner_id = 'local' AND i.slot = ?
+      )`;
+    }
+    return `EXISTS (
+      SELECT 1
+      FROM topping_entities te
+      JOIN interactions i
+        ON i.entity_kind = te.entity_kind AND i.entity_key = te.entity_key
+      WHERE te.topping_id = t.id AND i.owner_id = 'local'
+        AND i.slot = ?
+    )`;
+  }
+  if (node.key === '$interaction.rating') {
+    params.push(Number(node.value));
+    if (node.cmp === 'ne') {
+      return `EXISTS (
+        SELECT 1
+        FROM topping_entities te
+        JOIN interactions i
+          ON i.entity_kind = te.entity_kind AND i.entity_key = te.entity_key
+        WHERE te.topping_id = t.id AND i.owner_id = 'local' AND i.rating IS NOT NULL
+      ) AND NOT EXISTS (
+        SELECT 1
+        FROM topping_entities te
+        JOIN interactions i
+          ON i.entity_kind = te.entity_kind AND i.entity_key = te.entity_key
+        WHERE te.topping_id = t.id AND i.owner_id = 'local' AND i.rating = ?
+      )`;
+    }
+    return `EXISTS (
+      SELECT 1
+      FROM topping_entities te
+      JOIN interactions i
+        ON i.entity_kind = te.entity_kind AND i.entity_key = te.entity_key
+      WHERE te.topping_id = t.id AND i.owner_id = 'local'
+        AND i.rating IS NOT NULL
+        AND i.rating ${CMP_SQL[node.cmp as keyof typeof CMP_SQL] ?? '='} ?
+    )`;
+  }
   if (node.cmp === 'tagged') {
     const tag = String(node.value).replace(/^#/, '').toLowerCase();
     params.push(tag, `${escapeLike(tag)}/%`);
@@ -364,7 +419,7 @@ export async function loadItems(folderId: string | null, cfg: ViewCfg): Promise<
      ORDER BY ${order}`,
     params,
   );
-  return rows.map((r) => ({
+  const items: LibraryItem[] = rows.map((r) => ({
     id: r.id,
     type: r.type,
     title: r.title,
@@ -376,6 +431,77 @@ export async function loadItems(folderId: string | null, cfg: ViewCfg): Promise<
     thumbColor: r.thumb_color,
     aspect: r.thumb_aspect,
   }));
+  const marksByTopping = await loadInteractionMarks(items.map((item) => item.id));
+  for (const item of items) {
+    const marks = marksByTopping.get(item.id);
+    if (marks) item.interactionMarks = marks;
+  }
+  return items;
+}
+
+const INTERACTION_SLOTS = new Set<InteractionSlot>(['queued', 'active', 'done', 'dropped']);
+
+/**
+ * Resolve private per-entity marks after the main item query. A separate query
+ * prevents multi-axis interactions from duplicating topping rows; small views
+ * constrain by id, while the 20k Everything case avoids an enormous IN list.
+ */
+async function loadInteractionMarks(toppingIds: string[]): Promise<Map<string, InteractionMark[]>> {
+  if (toppingIds.length === 0) return new Map();
+  const constrain = toppingIds.length <= 900;
+  const rows = await platform.db.exec<{
+    topping_id: string;
+    set_id: string;
+    set_name: string;
+    labels: string;
+    slot: string | null;
+    rating: number | null;
+  }>(
+    `SELECT te.topping_id, i.set_id, s.name AS set_name, s.labels, i.slot, i.rating
+     FROM topping_entities te
+     JOIN interactions i
+       ON i.entity_kind = te.entity_kind AND i.entity_key = te.entity_key
+     JOIN status_sets s ON s.id = i.set_id
+     WHERE i.owner_id = 'local'
+       AND (i.slot IS NOT NULL OR i.rating IS NOT NULL)
+       ${constrain ? `AND te.topping_id IN (${toppingIds.map(() => '?').join(',')})` : ''}
+     ORDER BY i.updated_at DESC, i.set_id`,
+    constrain ? toppingIds : [],
+  );
+  const itemIds = new Set(toppingIds);
+  const marks = new Map<string, InteractionMark[]>();
+  for (const row of rows) {
+    if (!itemIds.has(row.topping_id)) continue;
+    const slot = row.slot && INTERACTION_SLOTS.has(row.slot as InteractionSlot)
+      ? row.slot as InteractionSlot
+      : null;
+    const labels = parseStatusLabels(row.labels);
+    const mark: InteractionMark = {
+      setId: row.set_id,
+      setName: row.set_name,
+      slot,
+      statusLabel: slot ? labels[slot] ?? slot : null,
+      rating: row.rating,
+    };
+    const list = marks.get(row.topping_id) ?? [];
+    list.push(mark);
+    marks.set(row.topping_id, list);
+  }
+  return marks;
+}
+
+function parseStatusLabels(json: string): Partial<Record<InteractionSlot, string>> {
+  try {
+    const parsed = JSON.parse(json) as Record<string, unknown>;
+    const labels: Partial<Record<InteractionSlot, string>> = {};
+    for (const slot of INTERACTION_SLOTS) {
+      if (typeof parsed[slot] === 'string') labels[slot] = parsed[slot];
+    }
+    return labels;
+  } catch {
+    // Custom status-set metadata must not make the whole library unreadable.
+    return {};
+  }
 }
 
 function groupOrderValue(v: PropertyValue | undefined): number | string | null {

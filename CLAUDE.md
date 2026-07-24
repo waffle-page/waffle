@@ -169,6 +169,15 @@ serialize, dirty deletion flushes before trash, and failed deletion leaves the
 draft recoverable. The dev harness provides an external-property conflict
 probe for the executable acceptance procedure.
 
+**Status/rating library surface complete:** the scanner derives a disposable
+`topping_entities` URL-identity projection without conflating it with carrier
+file hashes. Masonry, grid, list, and table receive presentation-ready private
+marks and render compact status/rating badges. Saved views filter with **My
+status** and **My rating** through SQL; ordinary frontmatter `rating` remains a
+separate property. Universal status filtering matches a semantic slot on any
+axis; axis-specific sort/group waits for a control that names its status set.
+Executable acceptance: `docs/recipes/verify-status-and-ratings.md`.
+
 **Product/architecture clarification recorded (docs only, 2026-07-24):**
 beginner-facing folders become purpose-shaped experiences assembled from
 ordinary views/properties/Lists/dashboards; layouts remain advanced primitives
@@ -196,25 +205,23 @@ tombstone so the connector cannot resurrect it. Reference flows:
 
 **Next, in agreed order:**
 
-1. **Finish the existing P1 semantic surface**: status/ratings chips +
-   interaction filters in library layouts.
-2. **P1 usability shell**: repair sticky-Title occlusion and number steppers;
+1. **P1 usability shell**: repair sticky-Title occlusion and number steppers;
    dismissible transient panels; visible Trash; Activity & Issues for sync/
    operation errors; This folder / All saved search over existing FTS; and the
    responsive bottom-right Add capture sheet. Preserve table ghost-row and all
    interaction regressions.
-3. **Settings + identity**: theme palette plus locale/timezone/week-start/unit/
+2. **Settings + identity**: theme palette plus locale/timezone/week-start/unit/
    currency preferences; then durable vault/folder/topping identity under
    `.waffle/` (ADR-022) before any List/duplicate/network code depends on IDs.
-4. **Optional identity and shells**: Supabase Auth with NO upload side effect;
+3. **Optional identity and shells**: Supabase Auth with NO upload side effect;
    Capacitor share extension; Tauri watcher; on-device Whisper.
-5. **P2 encrypted sync/sharing + discovery**: only after docs/14's threat-model
+4. **P2 encrypted sync/sharing + discovery**: only after docs/14's threat-model
    and restore gates. Personal Sync, collaborative invite links, and unlisted
    public publishing are distinct surfaces. Add local experience/folder
    suggestions first, then catalog sources/pins plus Map, Calendar, and
    editable Timeline. Public links retain the crawler-fetchable preview
    contract in `docs/04`.
-6. **Connector experiences**: when the SDK/materialization seam is next
+5. **Connector experiences**: when the SDK/materialization seam is next
    implemented, use Contacts→CRM and Oura→Sleep Dashboard as its two acceptance
    references (`docs/15`). The connector store still opens in P3; first-party
    packages dogfood the exact same contract earlier.

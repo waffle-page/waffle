@@ -18,7 +18,9 @@ A **local-first everything-library**. Folders hold **toppings** — notes, links
 - Typed properties: 10 user-facing kinds including Obsidian List/`multitext`, vault-level declarations at `.waffle/properties.json` (Obsidian's `types.json` pattern), frontmatter-first writes with targeted rescans; nested YAML Waffle cannot author remains visible and read-only.
 - The **table layout**: create-row-in-table, validated per-kind cell editors, bulk property edit, spreadsheet paste (Excel/Sheets/Airtable TSV → typed notes with auto-declared columns), cell/range selection, keyboard navigation, canonical TSV copy, paste-at-anchor with overflow notes, serialized same-note writes, persisted column resize/reorder, sticky Title, fill-down, and accessible active-cell/range semantics.
 - **Saved-view manager**: named views per folder with defaults, filters compiled to SQL, property sorts, group-by in table/grid/list.
-- Per-entity **status + ratings** (multi-axis slots) with the link detail view.
+- Per-entity **status + ratings** (multi-axis slots) with the link detail view,
+  personal badges in every library layout, and saved **My status** / **My
+  rating** filters backed by scanner-derived entity identity.
 - **Paste/drop images** into notes (vault files + `![[…]]` embeds); a note's first embedded image becomes its card thumbnail.
 - **Soft delete** to `.trash/` (ADR-021) from table selection and the editor.
 - **Bidirectional Obsidian config sync** (ADR-020): `types.json` and `.base` files sync at every scan; table/cards/list views, directional grouping, recursive negation, and representable `file.*` predicates round-trip through comment-preserving YAML surgery; inexpressible states freeze safely.
@@ -27,8 +29,8 @@ A **local-first everything-library**. Folders hold **toppings** — notes, links
   same file-first command boundary; exact trash paths restore without
   overwriting collisions, while native editor undo remains isolated.
 
-**Next** (working agreements in [CLAUDE.md](CLAUDE.md)): status/ratings
-surfacing in library views, then the remaining P1 queue.
+**Next** (working agreements in [CLAUDE.md](CLAUDE.md)): the P1 usability
+shell, then settings and durable identity.
 Phase ladder: `docs/04-phases.md`.
 
 ## Try it

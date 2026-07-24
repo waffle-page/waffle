@@ -17,7 +17,12 @@ The personal-marks layer: per-user status ("reading", "want to go") and ratings 
 - The same book saved in two folders shows one status — no split-brain shelves.
 - You can rate or queue something you've *never saved* (rate straight from the discovery feed, like rating a film on IMDb without listing it).
 - In shared folders, each member's overlay is their own: Marta's "been", your "want to go", on the same place topping — exactly Google Maps shared-list semantics.
-- The entity key for a link is a canonical-URL hash computed by the interactions layer at mark time. (`toppings.content_hash` is NOT that hash — it is file-byte identity for the scanner's move re-association; a vault link's hash covers its `.url` carrier file.)
+- The v1 entity key for a link hashes the trimmed URL string through one shared
+  helper at mark time and scan time.
+  (`toppings.content_hash` is NOT that hash — it is file-byte identity for the
+  scanner's move re-association; a vault link's hash covers its `.url` carrier
+  file.) Catalog URL normalization remains the later, distinct pipeline in
+  docs/07.
 
 ## Decision 1b — Multiple status AXES per type (added 2026-07-22)
 
@@ -54,7 +59,13 @@ Contribution rides the existing catalog protocol: anonymous, opt-out-able, k-thr
 
 ## Where it shows
 
-- **Library**: status chip + your rating on cards; filter/sort/group by `interaction.status`, `interaction.rating` in any view (the view engine resolves interaction keys per-owner at query time — they are *not* properties, because properties are shared).
+- **Library**: status chip + your rating in masonry, grid, list, and table.
+  Saved-view filters use the internal fields `$interaction.status` and
+  `$interaction.rating`, labelled **My status** and **My rating**. They resolve
+  per-owner at query time and are *not* properties, because properties are
+  shared. The universal status filter matches a semantic slot on any axis;
+  future axis-specific sort/group controls must name the status set rather than
+  collapse several axes into one misleading scalar.
 - **Add-flow & discovery**: every result carries the overlay — *saved · Read · 8/10 · ★4.3 Amazon · ★7.9 Waffle* — so "have I already read/been/bought this?" is answered at a glance, before saving.
 
 ## Schema (migration v2, PK widened by v4)
@@ -65,6 +76,13 @@ status_set_bindings(set_id, match_kind, match_value) -- 'schema_type'|'tag' → 
 interactions(owner_id, entity_kind, entity_key,      -- entity_kind='url' for now
              set_id, slot, rating, note,             -- PK = (owner, kind, key, set_id)
              status_at, rated_at, updated_at)        --   since v4 (Decision 1b)
+topping_entities(topping_id, entity_kind, entity_key) -- disposable entity↔file projection (v5)
 ```
+
+`topping_entities` is scanner-derived index state. For a `.url`, `entity_key`
+is the hash of the trimmed URL; it is never `toppings.content_hash`, which
+identifies the carrier file's bytes for move reconciliation. This separation
+lets two toppings for the same URL share marks and lets SQL filter overlays
+without hashing every URL during every render.
 
 Local-first like everything else; syncs only to *your own* devices (paid sync tier), never into shared folders. Server-side aggregation consumes contributions, not the table.
