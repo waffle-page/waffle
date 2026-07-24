@@ -45,7 +45,9 @@ tracking/session parameters, or short-link form differ.
   tracking parameters; they must never discard every unknown query parameter.
 - Provider adapters extract high-confidence stable keys when available (for
   example a Google Maps Place ID or CID). Coordinates or similar names alone
-  are insufficient evidence to merge places.
+  are insufficient evidence to merge places. Provider keys are not assumed
+  eternal: a verified replacement adds an alias and retains the former key
+  rather than rewriting history.
 - Scanning performs no network requests. Redirect resolution and
   `rel=canonical` discovery may run only during an explicit online Add/refresh
   action; an unresolved short link remains a provisional alias.
@@ -96,7 +98,13 @@ Personal ratings stored as REAL **0–10** (half-steps in UI); display maps to t
 
 ## Community ratings (P3, on the catalog)
 
-Contribution rides the existing catalog protocol: anonymous, opt-out-able, k-thresholded (no display below a minimum rater count — a niche rating reveals nothing about its rater). Aggregation and anti-abuse run server-side (ADR-019: catalog services are closed); the client's contract is only the contribution protocol above.
+Contribution rides the existing catalog protocol: anonymous, opt-out-able,
+k-thresholded (no display below a minimum rater count—a niche rating reveals
+nothing about its rater). Optional regional aggregates use only the consented
+coarse market and time buckets defined in docs/07; a sparse regional cell rolls
+up or remains hidden. Aggregation and anti-abuse run server-side (ADR-019:
+catalog services are closed); the client's contract is only the contribution
+protocol above.
 
 ## Where it shows
 

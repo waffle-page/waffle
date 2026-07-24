@@ -54,8 +54,10 @@ a map/filter rather than another folder; “Summer clothes” is a Wardrobe view
   domains may be evaluated on-device. Raw folder membership, names, and
   co-saved context are never sent merely to obtain automatic suggestions.
 - An explicit catalog/web search may send the query the user entered. Remote
-  candidate pools may use coarse type + locale; final private-context ranking
-  happens on-device.
+  candidate pools may use coarse type plus a consented market bucket; final
+  private-context ranking happens on-device. Exact coordinates, folder context,
+  and co-saved items stay local. Locale/timezone may suggest a market setting
+  but are not silently treated as the user's location (see `07-catalog.md`).
 - Connector manifests may declare coarse intent hints and bundled recipes. The
   trusted host matches them locally (for example, Wellness + Oura → Sleep
   Dashboard); connector code never receives folder/library context. See

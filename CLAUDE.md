@@ -209,6 +209,13 @@ deletion never deletes an annotated note, and user trash creates a suppression
 tombstone so the connector cannot resurrect it. Reference flows:
 `docs/15-connector-driven-experiences.md`.
 
+Catalog regional signals are coarse and consented. The open client protocol may
+contribute a versioned market/time bucket for ratings, distinct saves, and save
+velocity; it never contributes exact coordinates, folder/co-save context, IP
+history, or a stable public user identifier. Sparse cells roll up or stay
+hidden. Exact location may improve ranking locally without leaving the device.
+Engineering contract: `docs/07-catalog.md` Decisions 3–5.
+
 **Next, in agreed order:**
 
 1. **P1 URL/entity identity correctness**: settle the durable alias
@@ -217,7 +224,8 @@ tombstone so the connector cannot resurrect it. Reference flows:
    raw `.url` files; never perform network I/O during scan; migrate marks
    without silently collapsing conflicts. Two Google Maps URL variants carrying
    the same stable Place identity must share status/rating. Full cross-provider
-   clustering remains P3.
+   clustering remains P3. Design gate:
+   [issue #1](https://github.com/waffle-page/waffle/issues/1).
 2. **P1 usability shell**: repair sticky-Title occlusion and number steppers;
    dismissible transient panels; visible Trash; Activity & Issues for sync/
    operation errors; This folder / All saved search over existing FTS; and the

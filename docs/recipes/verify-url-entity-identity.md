@@ -31,9 +31,11 @@ thing** action may record that relationship earlier.
    map route, or other distinct resource.
 6. Provider adapters merge only on stable, high-confidence identifiers. Place
    names or nearby coordinates alone never auto-merge.
-7. Personal marks attach to the resolved entity. Every alias for that entity
+7. A provider identifier may be superseded. Verified successor IDs join the
+   existing entity while the old identifier remains an alias.
+8. Personal marks attach to the resolved entity. Every alias for that entity
    displays the same status and rating without per-card queries or hashing.
-8. Joining aliases is conflict preserving. Two different marks for the same
+9. Joining aliases is conflict preserving. Two different marks for the same
    owner/status set are never silently reduced to last-write-wins.
 
 ## Acceptance matrix
@@ -45,6 +47,7 @@ thing** action may record that relationship earlier.
 | Two Google Maps long URLs carrying the same Place ID/CID | Same |
 | Resolved `maps.app.goo.gl` short link and its long URL | Same after explicit online Add/refresh resolution |
 | Unresolved short link during an offline scan | Provisional; scan succeeds without network |
+| Verified successor for an obsolete provider Place ID | Same; former ID remains an alias |
 | Same place name or nearby coordinates without a stable provider key | Separate |
 | Product URLs whose query parameter selects a size/variant | Separate unless that provider explicitly proves equivalence |
 | Google Maps URLs carrying different stable Place IDs | Separate |
