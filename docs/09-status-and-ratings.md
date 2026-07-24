@@ -12,17 +12,58 @@ The personal-marks layer: per-user status ("reading", "want to go") and ratings 
 
 ## Decision 1 — Interaction state attaches to the *entity*, not the topping
 
-`(owner, entity)` → `{status, rating}`, keyed by URL identity (`url_hash`, later `entity_id`), **not** by topping id. Consequences, all deliberate:
+`(owner, entity)` → `{status, rating}`, keyed by URL identity (`url_hash`,
+later `entity_id`), **not** by topping id. Consequences, all deliberate:
 
-- The same book saved in two folders shows one status — no split-brain shelves.
+- Two toppings resolved to the same entity show one status — no split-brain
+  shelves.
 - You can rate or queue something you've *never saved* (rate straight from the discovery feed, like rating a film on IMDb without listing it).
 - In shared folders, each member's overlay is their own: Marta's "been", your "want to go", on the same place topping — exactly Google Maps shared-list semantics.
 - The v1 entity key for a link hashes the trimmed URL string through one shared
   helper at mark time and scan time.
   (`toppings.content_hash` is NOT that hash — it is file-byte identity for the
   scanner's move re-association; a vault link's hash covers its `.url` carrier
-  file.) Catalog URL normalization remains the later, distinct pipeline in
-  docs/07.
+  file.) This is an implementation bridge, not the final product identity:
+  URL variants still split today.
+
+## Decision 1a — Saved URLs are aliases, not entity identity
+
+A user's `.url` file preserves the exact address they saved. Identity is a
+separate derived layer:
+
+```text
+raw saved URL → normalized alias → provider identity → local entity
+                                      └──────────────→ personal marks
+```
+
+The required behavior is explicit: two Google Maps URLs for the same Place
+must show the same personal status and rating even when their host, path,
+tracking/session parameters, or short-link form differ.
+
+- Normalization is versioned, local, and performed on add/rescan—not in a
+  renderer. Generic rules may normalize syntax and remove an allowlist of known
+  tracking parameters; they must never discard every unknown query parameter.
+- Provider adapters extract high-confidence stable keys when available (for
+  example a Google Maps Place ID or CID). Coordinates or similar names alone
+  are insufficient evidence to merge places.
+- Scanning performs no network requests. Redirect resolution and
+  `rel=canonical` discovery may run only during an explicit online Add/refresh
+  action; an unresolved short link remains a provisional alias.
+- Many aliases may resolve to one entity. High-confidence evidence merges
+  automatically; ambiguous candidates remain separate until stronger evidence
+  or an explicit **Same thing** action exists.
+- Raw URLs never change as a side effect of resolution. Deterministic aliases
+  must rebuild from files; manual or network-derived aliases require durable
+  vault metadata under the identity ADR gate.
+- Re-keying must be conflict preserving. If aliases being joined already carry
+  different marks for the same owner/status set, neither row is silently
+  overwritten; the operation retains both inputs and surfaces a resolution.
+
+This private-library foundation moves before the P1 usability shell. It is not
+the later P3 semantic clustering problem: connecting a Maps listing,
+TripAdvisor page, and official site can remain catalog/entity-resolution work.
+The bounded implementation and acceptance matrix live in
+`docs/recipes/verify-url-entity-identity.md`.
 
 ## Decision 1b — Multiple status AXES per type (added 2026-07-22)
 
@@ -83,6 +124,8 @@ topping_entities(topping_id, entity_kind, entity_key) -- disposable entity↔fil
 is the hash of the trimmed URL; it is never `toppings.content_hash`, which
 identifies the carrier file's bytes for move reconciliation. This separation
 lets two toppings for the same URL share marks and lets SQL filter overlays
-without hashing every URL during every render.
+without hashing every URL during every render. Migration v5 therefore handles
+exact trimmed-URL equality only; the alias/entity hardening above is the next
+correctness slice.
 
 Local-first like everything else; syncs only to *your own* devices (paid sync tier), never into shared folders. Server-side aggregation consumes contributions, not the table.

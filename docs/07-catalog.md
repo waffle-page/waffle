@@ -37,7 +37,21 @@ user saves a URL
 ## Design decisions
 
 ### 1. The unit is the entity, not the URL
-Normalization first: strip tracking params, resolve shortlinks, honor `rel=canonical` → **URL identity** (`url_hash`). Then **entity resolution** clusters URLs pointing at the same thing (a restaurant on Google Maps + TripAdvisor + its own site) via type-specific matching keys — name+geo for places, GTIN / brand+model for products, oEmbed ID for videos. V1 ships canonical URLs only; clustering is v2 — the catalog is useful before the hard part.
+The private library establishes the first identity seam in P1: preserve every
+raw saved URL, derive versioned aliases locally, and use high-confidence
+provider identifiers so URL variants such as two links to one Google Maps
+Place converge. Scanner work remains offline; explicit Add/refresh may resolve
+redirects or canonical links. Exact rules and false-merge protections:
+`docs/09-status-and-ratings.md` and
+`docs/recipes/verify-url-entity-identity.md`.
+
+The global catalog extends that seam rather than inventing another one:
+normalization produces **URL identity** (`url_hash`), then semantic **entity
+resolution** clusters different sites pointing at the same thing (a restaurant
+on Google Maps + TripAdvisor + its own site) via type-specific matching keys —
+name+geo for places, GTIN / brand+model for products, oEmbed ID for videos.
+Cross-provider clustering remains P3; the private alias foundation does not
+require uploading a URL or folder context.
 
 ### 2. Reuse the standards regime (see 06-schemas-and-units.md)
 Records are **schema.org**-typed (`Product`, `Place`, `VideoObject`, `Article`, `Recipe`, generic) — which is what JSON-LD extraction natively yields — with UCUM/ISO value discipline (price = amount + ISO 4217, duration = seconds, geo = WGS84). Extraction **site adapters** for stubborn domains reuse the connector-store package machinery (manifest, sandbox, registry). One standards regime across pantry and catalog.

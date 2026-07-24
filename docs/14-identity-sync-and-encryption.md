@@ -55,6 +55,31 @@ Before any network feature depends on identity:
 The exact `.waffle/` file layout and offline-rename ambiguity procedure must be
 settled in the implementation ADR before changing the scanner.
 
+### Topping identity and content-entity identity are different
+
+A topping is one user-owned saved object; duplicating it creates another
+topping ID. A content entity is the real-world thing that one or many saved
+URLs identify. Personal status and ratings attach to the latter.
+
+- Raw URLs remain byte-for-byte user content and are never rewritten by
+  normalization.
+- Deterministic URL aliases rebuild locally. Provider/network-derived and
+  manual **Same thing** aliases must persist in encrypted, portable vault
+  metadata; SQLite remains only their projection.
+- Devices must run versioned normalization rules and converge on the same
+  high-confidence provider identity. A rule upgrade is an explicit,
+  idempotent migration rather than an invisible change during rendering.
+- Entity aliases and personal marks join the encrypted personal replica. A
+  shared folder never exposes one member's private status/rating to another.
+- Conflicting marks discovered while joining aliases remain recoverable and
+  require an explicit merge policy; last-write-wins must not silently destroy
+  either record.
+
+The immediate P1 scope is same-provider, high-confidence aliasing—Google Maps
+Place variants are the acceptance case. Cross-provider semantic clustering
+remains catalog work. The exact durable representation is part of the same
+pre-implementation identity gate as the `.waffle/` layout above.
+
 ### Duplication and large local libraries
 
 Waffle imposes no arbitrary topping-count limit on a local vault. Performance

@@ -17,6 +17,10 @@ Executable specification for the personal-marks projection in
    corresponding mark does not match, including `is not`.
 6. Frontmatter properties named `rating` or `status` remain independent.
 
+Migration v5 satisfies exact trimmed-URL identity only. Tracking variants,
+short links, and provider aliases are the next correctness slice, specified in
+`verify-url-entity-identity.md`.
+
 ## Fixture exercise
 
 Start `pnpm dev`, open `?dev`, then **Create fixture vault** → **Scan vault**.

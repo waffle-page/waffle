@@ -29,8 +29,8 @@ A **local-first everything-library**. Folders hold **toppings** — notes, links
   same file-first command boundary; exact trash paths restore without
   overwriting collisions, while native editor undo remains isolated.
 
-**Next** (working agreements in [CLAUDE.md](CLAUDE.md)): the P1 usability
-shell, then settings and durable identity.
+**Next** (working agreements in [CLAUDE.md](CLAUDE.md)): harden URL aliases and
+entity identity for personal marks, then build the P1 usability shell.
 Phase ladder: `docs/04-phases.md`.
 
 ## Try it

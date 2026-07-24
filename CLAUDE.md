@@ -177,6 +177,12 @@ status** and **My rating** through SQL; ordinary frontmatter `rating` remains a
 separate property. Universal status filtering matches a semantic slot on any
 axis; axis-specific sort/group waits for a control that names its status set.
 Executable acceptance: `docs/recipes/verify-status-and-ratings.md`.
+Known correctness boundary: v5 equates only identical trimmed URLs. The next
+slice must introduce the raw-URL → alias → entity seam so variants for the same
+Google Maps Place share marks. It must not merely strip all query parameters or
+replace one temporary hash with another; requirements and acceptance:
+`docs/09-status-and-ratings.md` Decision 1a and
+`docs/recipes/verify-url-entity-identity.md`.
 
 **Product/architecture clarification recorded (docs only, 2026-07-24):**
 beginner-facing folders become purpose-shaped experiences assembled from
@@ -205,23 +211,31 @@ tombstone so the connector cannot resurrect it. Reference flows:
 
 **Next, in agreed order:**
 
-1. **P1 usability shell**: repair sticky-Title occlusion and number steppers;
+1. **P1 URL/entity identity correctness**: settle the durable alias
+   representation under the existing identity ADR gate, then implement
+   versioned local normalization and high-confidence provider aliases. Preserve
+   raw `.url` files; never perform network I/O during scan; migrate marks
+   without silently collapsing conflicts. Two Google Maps URL variants carrying
+   the same stable Place identity must share status/rating. Full cross-provider
+   clustering remains P3.
+2. **P1 usability shell**: repair sticky-Title occlusion and number steppers;
    dismissible transient panels; visible Trash; Activity & Issues for sync/
    operation errors; This folder / All saved search over existing FTS; and the
    responsive bottom-right Add capture sheet. Preserve table ghost-row and all
    interaction regressions.
-2. **Settings + identity**: theme palette plus locale/timezone/week-start/unit/
+3. **Settings + durable object identity**: theme palette plus
+   locale/timezone/week-start/unit/
    currency preferences; then durable vault/folder/topping identity under
    `.waffle/` (ADR-022) before any List/duplicate/network code depends on IDs.
-3. **Optional identity and shells**: Supabase Auth with NO upload side effect;
+4. **Optional identity and shells**: Supabase Auth with NO upload side effect;
    Capacitor share extension; Tauri watcher; on-device Whisper.
-4. **P2 encrypted sync/sharing + discovery**: only after docs/14's threat-model
+5. **P2 encrypted sync/sharing + discovery**: only after docs/14's threat-model
    and restore gates. Personal Sync, collaborative invite links, and unlisted
    public publishing are distinct surfaces. Add local experience/folder
    suggestions first, then catalog sources/pins plus Map, Calendar, and
    editable Timeline. Public links retain the crawler-fetchable preview
    contract in `docs/04`.
-5. **Connector experiences**: when the SDK/materialization seam is next
+6. **Connector experiences**: when the SDK/materialization seam is next
    implemented, use Contacts→CRM and Oura→Sleep Dashboard as its two acceptance
    references (`docs/15`). The connector store still opens in P3; first-party
    packages dogfood the exact same contract earlier.
