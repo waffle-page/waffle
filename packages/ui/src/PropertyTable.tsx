@@ -466,7 +466,10 @@ export function PropertyTable({
     const inRange = cellIsSelected(rowIndex, columnIndex);
     const active = !!grid.selection && sameTableGridCell(grid.selection.focus, cell);
     return {
-      background: inRange ? 'var(--surface-2)' : undefined,
+      // Omit the key outside a range: `background: undefined` applied after a
+      // sticky cell's opaque fill removes that fill and lets scrolled columns
+      // paint through Title.
+      ...(inRange ? { background: 'var(--surface-2)' } : {}),
       boxShadow: active ? 'inset 0 0 0 2px var(--accent)' : inRange ? 'inset 0 0 0 1px var(--border)' : undefined,
       cursor: 'cell',
     };

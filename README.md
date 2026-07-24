@@ -29,8 +29,10 @@ A **local-first everything-library**. Folders hold **toppings** — notes, links
   same file-first command boundary; exact trash paths restore without
   overwriting collisions, while native editor undo remains isolated.
 
-**Next** (working agreements in [CLAUDE.md](CLAUDE.md)): harden URL aliases and
-entity identity for personal marks, then build the P1 usability shell.
+**Next** (working agreements in [CLAUDE.md](CLAUDE.md)): build the P1
+usability shell, then durable object identity. Durable URL/manual aliases wait
+for the provider-neutral private entity/claim substrate; the proprietary
+Catalog is a separate optional product.
 Phase ladder: `docs/04-phases.md`.
 
 ## Try it
@@ -60,6 +62,7 @@ pnpm dev        # opens the app; ?dev = dev-spine harness (seed 20k toppings, be
 | [docs/13-experiences-and-suggestions.md](docs/13-experiences-and-suggestions.md) | Mini-app experiences, contextual suggestions, Add, search |
 | [docs/14-identity-sync-and-encryption.md](docs/14-identity-sync-and-encryption.md) | Durable identity, optional accounts, E2EE sharing, large-vault restore |
 | [docs/15-connector-driven-experiences.md](docs/15-connector-driven-experiences.md) | Contacts→CRM and Oura→Sleep Dashboard reference flows |
+| [docs/16-catalog-product-and-entity-graph.md](docs/16-catalog-product-and-entity-graph.md) | Separate Catalog product, provider-neutral entity/claim graph, privacy and acquisition boundaries |
 | [docs/recipes/](docs/recipes/) | How to add a property type, a renderer, … |
 
 ## Monorepo layout

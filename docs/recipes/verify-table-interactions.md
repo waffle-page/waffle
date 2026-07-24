@@ -286,6 +286,9 @@ Record the commit, browser, spreadsheet application, and fixture topping count.
 - Give a number cell a recognizable value. Type an alphabetic replacement and
   press Enter. The editor must remain open with `aria-invalid` and an inline
   error. Escape; the prior number must remain.
+- Edit ordinary number and money cells. Confirm neither editor exposes browser
+  spinner arrows or changes value through a native stepper; decimal keyboard
+  input and explicit validation still work.
 - Paste an unrecognized token into a checkbox and invalid text into a
   number/money/date cell. Existing values must remain.
 - Rapidly commit two different properties on the same note, then reload and
@@ -301,7 +304,10 @@ Record the commit, browser, spreadsheet application, and fixture topping count.
 - Drag the second property before the first. Switch views and reload; confirm
   order and widths survive together and sorting did not change during drag.
 - Horizontally scroll a wide table. Confirm row selectors and Title remain
-  fixed while property columns pass beneath them.
+  fixed while property columns pass beneath them. Check ordinary, selected,
+  range-selected, and active Title cells plus the header in light and dark
+  themes: every sticky surface remains opaque, with its edge divider visible
+  and no text/grid line bleeding through.
 - In the fixture-derived **Mejores recetas** view, confirm the `.base`
   `columnSize` widths render. Resize/reorder, reload, and rescan; confirm the
   derived view neither freezes nor flaps and `file.name` sizing survives.

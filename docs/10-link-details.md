@@ -9,7 +9,7 @@ and contributors can add templates for verticals we never imagined.
 ## The core split: domain for extraction, type for display (ADR-015)
 
 ```
-URL ──► EXTRACTION (matched by DOMAIN) ──► typed record ──► DISPLAY (matched by TYPE) ──► detail view
+URL ──► EXTRACTION (matched by DOMAIN) ──► typed private record/claims ──► DISPLAY (matched by TYPE) ──► detail view
         site adapters: password-manager       schema.org        detail templates:
         host rules + generic JSON-LD/og       type + props      most-specific-type wins
         fallback                                                + Thing fallback
@@ -24,8 +24,8 @@ URL ──► EXTRACTION (matched by DOMAIN) ──► typed record ──► DI
 - **Display matches by type, never by domain.** Templates register against
   schema.org types; selection walks the type hierarchy, most specific wins —
   the same dispatch rule as status-set bindings (09). Why: one `Product`
-  template covers the same product on fifty domains and the fifty-first; and a
-  typed record arriving from the catalog (someone else's save, P3 feed)
+  template covers the same product on fifty domains and the fifty-first; and an
+  authorized typed projection arriving from the separate Catalog product
   renders on your device without their domain adapter installed. The typed
   record travels; the renderer is local.
 
@@ -75,8 +75,50 @@ it already lives.
 
 Link toppings gain `schema_type` (the catalog spec already carries it
 server-side) + extracted media lists (`images[]`, `videos[]`) and typed
-properties via the existing EAV — templates render what extraction stored,
-never fetch at view time. Migration lands with the P1 detail-view build.
+properties via the existing EAV. Private extraction does not make a source
+claim or media asset distributable; Catalog ingestion separately records
+provenance, observed time, rights, attribution, and takedown state. Templates
+render what their input stored and never fetch at view time. Migration lands
+with the P1 detail-view build.
+
+## Create note from a source
+
+A link or file does not change topping type in place. **Create note from…** is
+an explicit derivation:
+
+```text
+source .url or file ──remains unchanged──┐
+                                         └──► new user-owned .md note
+                                              source · captured time
+                                              extracted/summary content
+                                              user annotations
+```
+
+For a URL the action may offer:
+
+- **Reference note:** title, permitted metadata/excerpt, source link, and an
+  empty annotation body.
+- **Reading copy:** permitted article content converted to Markdown through an
+  explicit user-initiated fetch.
+- **Summary:** a derived summary with source link and clearly separated quoted
+  material.
+
+For a file the equivalent action may extract text, OCR, transcribe, or
+summarize while retaining the original file. The note is a new topping
+`derived_from` or `describes` the source; it is not automatically the same
+content entity and never inherits identity merely because its text came from
+the source.
+
+The `.md` records source URL or relative file evidence, capture time,
+extractor/model version where relevant, and source hash/attribution where
+available. Durable source-topping/entity references arrive only after
+ADR-022/027; current path/hash evidence is not identity.
+
+Refresh never overwrites user-authored bytes. It creates a new snapshot/diff,
+or updates only an explicitly source-owned managed region under a later
+write-back contract. **Replace with note** is a separate compound command:
+create and rescan the note first, then soft-trash the source with Undo. Partial
+failure leaves the verified source and any completed note visible.
 
 ## Sequencing
 
@@ -85,4 +127,6 @@ never fetch at view time. Migration lands with the P1 detail-view build.
   status/ratings controls live here.
 - **P2**: rich extraction (native fetch in shells; JSON-LD/oEmbed; media
   galleries; source ratings), `Place`/`Article` templates, per-site adapters.
-- **P3+**: contributor template/adapter packages through the store.
+- **Catalog product / later Core**: contributor template/adapter packages
+  through the store, with adapters remaining evidence collectors rather than
+  identity authorities.

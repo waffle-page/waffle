@@ -58,27 +58,38 @@ settled in the implementation ADR before changing the scanner.
 ### Topping identity and content-entity identity are different
 
 A topping is one user-owned saved object; duplicating it creates another
-topping ID. A content entity is the real-world thing that one or many saved
-URLs identify. Personal status and ratings attach to the latter.
+topping ID. A content entity is the real-world thing described by one or many
+source claims and external identifiers. Personal status and ratings attach to
+the latter.
 
 - Raw URLs remain byte-for-byte user content and are never rewritten by
   normalization.
-- Deterministic URL aliases rebuild locally. Provider/network-derived and
-  manual **Same thing** aliases must persist in encrypted, portable vault
-  metadata; SQLite remains only their projection.
-- Devices must run versioned normalization rules and converge on the same
-  high-confidence provider identity. A rule upgrade is an explicit,
-  idempotent migration rather than an invisible change during rendering.
-- Entity aliases and personal marks join the encrypted personal replica. A
-  shared folder never exposes one member's private status/rating to another.
+- Deterministic URL aliases rebuild locally and currently produce only a
+  disposable effective candidate bridge. Provider identifiers are sourced
+  claims, not permanent identity.
+- The future private entity ID is opaque and durable in encrypted, portable
+  vault metadata. The exact `.waffle/` entity/identifier/claim and redirect
+  representation requires its implementation ADR; SQLite remains a disposable
+  projection.
+- A private entity may map to a canonical entity in the separate proprietary
+  Catalog product, but that mapping does not upload private evidence or
+  rewrite the private ID out of history. Catalog contributions never use the
+  private ID as a stable public contributor identifier.
+- Devices must run versioned normalization/projection rules. A rule upgrade is
+  an explicit, idempotent migration rather than an invisible change during
+  rendering.
+- Private entity claims and personal marks join the encrypted personal
+  replica. A shared folder never exposes one member's private status/rating or
+  private evidence to another.
 - Conflicting marks discovered while joining aliases remain recoverable and
   require an explicit merge policy; last-write-wins must not silently destroy
   either record.
 
-The immediate P1 scope is same-provider, high-confidence aliasing—Google Maps
-Place variants are the acceptance case. Cross-provider semantic clustering
-remains catalog work. The exact durable representation is part of the same
-pre-implementation identity gate as the `.waffle/` layout above.
+Deterministic same-provider sub-slice A is complete with the bounded Google
+Maps acceptance case. Durable URL sub-slice B waits for the generic portable
+private entity/identifier/claim substrate; cross-source resolution belongs to
+the separate Catalog product. See ADR-027 and
+`docs/16-catalog-product-and-entity-graph.md`.
 
 ### Duplication and large local libraries
 
@@ -277,7 +288,9 @@ against every collaborator.
 
 Before enabling Sync or Share, settle and threat-model:
 
-1. Durable `.waffle/` identity representation and migration.
+1. Durable `.waffle/` vault/folder/topping identity representation and
+   migration; the separate private content-entity/claim representation must be
+   settled before Sync transports it.
 2. Audited crypto implementation and cross-platform key storage.
 3. Device enrollment, key backup/recovery, invite claims, and metadata leakage.
 4. Folder/key hierarchy, membership epochs, revocation, and lazy rewrapping.

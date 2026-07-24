@@ -12,7 +12,8 @@ day; every change is reviewed against that, not against taste.
 4. `docs/02-architecture.md` — stack, storage classes, the Finder covenant.
 5. Before product-shell, identity, account, sync, sharing, or discovery work:
    `docs/13-experiences-and-suggestions.md` and
-   `docs/14-identity-sync-and-encryption.md`.
+   `docs/14-identity-sync-and-encryption.md`. Before content-entity or Catalog
+   work also read `docs/16-catalog-product-and-entity-graph.md`.
 6. Before connector/materialization or connector-driven suggestion work:
    `docs/05-connector-sdk.md` and `docs/15-connector-driven-experiences.md`.
 7. Other per-area specs as needed: `docs/12` (tables/notes-as-rows), `docs/10`
@@ -179,9 +180,11 @@ candidate is empty or semantically identical; a differing owner/status-set
 value retains both inputs and records `state='conflict'`. Renderers and SQL
 filters consume the effective key without per-card hashing. Executable
 acceptance: `docs/recipes/verify-status-and-ratings.md` and
-`docs/recipes/verify-url-entity-identity.md`. Issue #1 remains open for durable
-network/manual evidence, short-link resolution, provider-ID succession, and
-conflict UI.
+`docs/recipes/verify-url-entity-identity.md`. The effective hash is a
+candidate bridge, not durable private or Catalog identity. Issue #1 remains
+open for durable network/manual evidence, short-link resolution, provider-ID
+succession, and conflict UI, all sequenced behind the generic entity/claim
+substrate rather than another URL-specific store.
 
 **Product/architecture clarification recorded (docs only, 2026-07-24):**
 beginner-facing folders become purpose-shaped experiences assembled from
@@ -208,45 +211,68 @@ deletion never deletes an annotated note, and user trash creates a suppression
 tombstone so the connector cannot resurrect it. Reference flows:
 `docs/15-connector-driven-experiences.md`.
 
-Catalog regional signals are coarse and consented. The open client protocol may
-contribute a versioned market/time bucket for ratings, distinct saves, and save
-velocity; it never contributes exact coordinates, folder/co-save context, IP
-history, or a stable public user identifier. Sparse cells roll up or stay
-hidden. Exact location may improve ranking locally without leaving the device.
-Engineering contract: `docs/07-catalog.md` Decisions 3–5.
+**Catalog product boundary recorded (ADR-027, 2026-07-24):** Waffle Core is a
+complete local-first product without the Catalog. The provider-neutral master
+entity/claim graph, corpus, resolution, ranking, aggregation, and abuse systems
+form a separate proprietary product behind ADR-019. URLs and external
+identifiers are sourced claims, never permanent identity; merges, redirects,
+splits, succession, media rights, and takedowns retain history. Acquisition is
+limited to user-initiated actions, permitted metadata/APIs, feeds,
+licensed/compatible open datasets, standards, and partnerships—no
+unauthorized bulk crawling, authentication/quota circumvention, private-API
+imitation, or indiscriminate republication. Full contract:
+`docs/16-catalog-product-and-entity-graph.md`.
+
+Catalog signals remain coarse and consented. The open client protocol may
+contribute approved projections for ratings, distinct saves, save velocity,
+and versioned market/time buckets; it never contributes private entity IDs,
+exact coordinates, folder/co-save context, IP history, or a stable public user
+identifier. Sparse cells roll up or stay hidden. Exact location may improve
+ranking locally without leaving the device. Engineering contract:
+`docs/07-catalog.md` Decisions 3–5.
 
 **Next, in agreed order:**
 
-1. **P1 URL/entity identity sub-slice B**: under
-   [issue #1](https://github.com/waffle-page/waffle/issues/1), settle durable
-   manual/network alias evidence, short-link resolution, obsolete provider-ID
-   succession, and a conflict-resolution surface. Do not add network work to
-   scan or infer identity from Maps names/coordinates/undocumented blobs.
-2. **P1 usability shell**: repair sticky-Title occlusion and number steppers;
+1. **P1 usability shell**: repair sticky-Title occlusion and number steppers;
    dismissible transient panels; visible Trash; Activity & Issues for sync/
    operation errors; This folder / All saved search over existing FTS; and the
    responsive bottom-right Add capture sheet. Preserve table ghost-row and all
    interaction regressions.
-3. **Settings + durable object identity**: theme palette plus
+2. **Settings + durable object identity**: theme palette plus
    locale/timezone/week-start/unit/
    currency preferences; then durable vault/folder/topping identity under
    `.waffle/` (ADR-022) before any List/duplicate/network code depends on IDs.
+3. **Generic private content-entity substrate, then URL sub-slice B**: settle
+   opaque durable private entity IDs, generic identifier/fact/relationship
+   claims, redirects/splits, mark migration, Catalog-ID mapping, and the exact
+   `.waffle/` representation in an implementation ADR. Then resume
+   [issue #1](https://github.com/waffle-page/waffle/issues/1) for
+   manual/network evidence, short links, provider-ID succession, and conflict
+   UI. Do not expand the Google adapter, add network work to scan, or treat
+   provider/candidate hashes as durable identity.
 4. **Optional identity and shells**: Supabase Auth with NO upload side effect;
    Capacitor share extension; Tauri watcher; on-device Whisper.
-5. **P2 encrypted sync/sharing + discovery**: only after docs/14's threat-model
+5. **P2 encrypted sync/sharing + local discovery**: only after docs/14's threat-model
    and restore gates. Personal Sync, collaborative invite links, and unlisted
    public publishing are distinct surfaces. Add local experience/folder
-   suggestions first, then catalog sources/pins plus Map, Calendar, and
-   editable Timeline. Public links retain the crawler-fetchable preview
-   contract in `docs/04`.
+   suggestions first, then Map, Calendar, and editable Timeline. Optional
+   Catalog sources/pins integrate only through ADR-027's separate product
+   boundary. Public links retain the crawler-fetchable preview contract in
+   `docs/04`.
 6. **Connector experiences**: when the SDK/materialization seam is next
    implemented, use Contacts→CRM and Oura→Sleep Dashboard as its two acceptance
-   references (`docs/15`). The connector store still opens in P3; first-party
+   references (`docs/15`). The connector store opens later; first-party
    packages dogfood the exact same contract earlier.
+7. **Separate Catalog product track**: validate one permission-cleared,
+   economically viable vertical before expanding the proprietary master graph.
+   Core releases never wait on it and no Catalog server implementation lands
+   in this repository.
 
 Known deferred gaps (each states its owner): link/file properties
 (`.waffle/meta.json`, ADR-013), the current path/index-only identity limitation
-(must be removed in step 3 above), restore-from-trash UI, vault switcher
+(must be removed in step 2 above), the current URL candidate-hash interaction
+bridge (removed only through step 3's generic entity substrate),
+restore-from-trash UI, vault switcher
 (single active vault is documented v1 behavior), duplicate topping(s), Lists,
 and manual acceptance specs for the remaining quarantine modules (the table
 contract now lives at

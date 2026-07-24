@@ -114,6 +114,14 @@ These are sections of one flow, not separate products. Action order may adapt
 modestly to platform and use, but must not jump unpredictably. Table's ghost
 row remains a fast contextual affordance; the `+` is the universal one.
 
+An existing link/file detail may also offer **Create note from…**. This creates
+a new `.md` reference, reading copy, extraction/OCR/transcript, or summary while
+leaving the source topping unchanged. It records provenance and never silently
+overwrites later user edits. A separately labelled **Replace with note**
+creates/rescans the note before moving the source to Trash, with truthful
+partial completion and Undo. Exact source/refresh contract:
+`docs/10-link-details.md`.
+
 ## Search has three explicit scopes
 
 One search entry point exposes:
@@ -180,4 +188,6 @@ and session-history receipt where supported.
   existing content, and `+ Custom view`.
 - **P2:** contextual sources, catalog candidate API, Map, Calendar, then
   editable Timeline and the complete Trip Planner experience.
-- **P3:** global catalog/feed signals and marketplace-scale discovery.
+- **Separate Catalog product:** master-graph/feed signals and
+  marketplace-scale discovery, integrated optionally through the audited
+  protocol in `docs/16-catalog-product-and-entity-graph.md`.

@@ -6,14 +6,16 @@ The personal-marks layer: per-user status ("reading", "want to go") and ratings 
 
 | Layer | What | Ownership | Visibility |
 | --- | --- | --- | --- |
-| **Source rating** | Extracted at save/refresh from the page (Amazon stars, IMDb score, Google rating), client-side | Fact about the entity | Shared — part of catalog payload + local properties |
+| **Source rating** | A permitted observed rating with raw scale/count, source, time, rights, and attribution | Source claim about the entity | Private claim by default; public only through the Catalog's authorized projection |
 | **Personal interaction** | Your status + your rating + optional note/dates | Per-user × per-entity | **Private, always** — never syncs into shared folders; each member sees only their own overlay |
-| **Waffle community rating** | Aggregate of users' personal ratings on a catalog entity | The network's | Public, k-thresholded aggregate (P3) |
+| **Waffle community rating** | Aggregate of consented personal-rating projections on a Catalog entity | The Catalog network's | Public only above its reviewed privacy threshold |
 
 ## Decision 1 — Interaction state attaches to the *entity*, not the topping
 
-`(owner, entity)` → `{status, rating}`, keyed by URL identity (`url_hash`,
-later `entity_id`), **not** by topping id. Consequences, all deliberate:
+`(owner, entity)` → `{status, rating}`, ultimately keyed by an opaque durable
+private or Catalog Waffle entity ID, **not** by topping ID, URL, or provider
+identifier. The current `entity_kind='url'` candidate hash is an explicitly
+temporary bridge. Consequences, all deliberate:
 
 - Two toppings resolved to the same entity show one status — no split-brain
   shelves.
@@ -32,8 +34,12 @@ A user's `.url` file preserves the exact address they saved. Identity is a
 separate derived layer:
 
 ```text
-raw saved URL → normalized alias → provider identity → local entity
-                                      └──────────────→ personal marks
+raw saved URL → normalized/provider evidence → effective local candidate
+                                                     └────→ personal marks
+
+future generic substrate:
+source claims → opaque private entity ID ↔ optional Catalog entity ID
+                                      └────→ personal marks
 ```
 
 The required behavior is explicit: two Google Maps URLs for the same Place
@@ -43,12 +49,13 @@ tracking/session parameters, or short-link form differ.
 - Normalization is versioned, local, and performed on add/rescan—not in a
   renderer. Generic rules may normalize syntax and remove an allowlist of known
   tracking parameters; they must never discard every unknown query parameter.
-- Provider adapters extract high-confidence stable keys when available (the
-  first bounded adapter accepts a documented Google Maps `query_place_id`).
+- Provider adapters extract high-confidence identifier evidence when
+  available (the first bounded adapter accepts a documented Google Maps
+  `query_place_id`).
   Undocumented CID/data blobs, coordinates, or similar names are insufficient
-  evidence in this slice. Provider keys are not assumed eternal: a verified
-  replacement adds an alias and retains the former key rather than rewriting
-  history.
+  evidence in this slice. Provider identifiers are claims, never Waffle
+  identity. A verified replacement records succession and retains the former
+  claim rather than re-keying the entity.
 - Scanning performs no network requests. Redirect resolution and
   `rel=canonical` discovery may run only during an explicit online Add/refresh
   action; an unresolved short link remains a provisional alias.
@@ -56,16 +63,19 @@ tracking/session parameters, or short-link form differ.
   automatically; ambiguous candidates remain separate until stronger evidence
   or an explicit **Same thing** action exists.
 - Raw URLs never change as a side effect of resolution. Deterministic aliases
-  must rebuild from files; manual or network-derived aliases require durable
-  vault metadata under the identity ADR gate.
+  must rebuild from files; manual or network-derived evidence requires the
+  generic portable entity/identifier/claim substrate under ADR-027 and
+  `docs/16-catalog-product-and-entity-graph.md`.
 - Re-keying must be conflict preserving. If aliases being joined already carry
   different marks for the same owner/status set, neither row is silently
   overwritten; the operation retains both inputs and surfaces a resolution.
 
-This private-library foundation moves before the P1 usability shell. It is not
-the later P3 semantic clustering problem: connecting a Maps listing,
-TripAdvisor page, and official site can remain catalog/entity-resolution work.
-The bounded implementation and acceptance matrix live in
+Deterministic sub-slice A is complete. Durable URL sub-slice B no longer moves
+before the P1 usability shell: it follows the generic private entity/claim
+substrate so short links, provider succession, and manual **Same thing** do not
+create another URL-specific identity store. Cross-source semantic resolution
+belongs to the separate Catalog product. The bounded implementation and
+acceptance matrix live in
 `docs/recipes/verify-url-entity-identity.md`.
 
 ## Decision 1b — Multiple status AXES per type (added 2026-07-22)
@@ -95,13 +105,14 @@ Bindings resolve by schema.org type first, then by tag (user-assignable: tag `re
 
 ## Decision 3 — One canonical rating scale
 
-Personal ratings stored as REAL **0–10** (half-steps in UI); display maps to the user's preference (5-star, 10-point, thumbs). Source ratings normalize to 0–10 at extraction with the raw value + original scale + vote count preserved (`{raw: 4.6, scale: 5, count: 1284}`) — the units discipline from `06-schemas-and-units.md` applied to opinion.
+Personal ratings stored as REAL **0–10** (half-steps in UI); display maps to the user's preference (5-star, 10-point, thumbs). Permitted source-rating claims normalize to 0–10 with the raw value + original scale + vote count preserved (`{raw: 4.6, scale: 5, count: 1284}`), alongside source, observation time, rights, and attribution — the units discipline from `06-schemas-and-units.md` applied to opinion.
 
-## Community ratings (P3, on the catalog)
+## Community ratings (separate Catalog product)
 
-Contribution rides the existing catalog protocol: anonymous, opt-out-able,
-k-thresholded (no display below a minimum rater count—a niche rating reveals
-nothing about its rater). Optional regional aggregates use only the consented
+Contribution rides the Catalog protocol only after a distinct consent
+ceremony and without a private entity ID or stable public user identifier.
+Aggregates remain thresholded (no display below a reviewed minimum rater
+count). Optional regional aggregates use only the consented
 coarse market and time buckets defined in docs/07; a sparse regional cell rolls
 up or remains hidden. Aggregation and anti-abuse run server-side (ADR-019:
 catalog services are closed); the client's contract is only the contribution
@@ -134,9 +145,11 @@ url_entity_aliases(alias_key, entity_key, candidate_key,
 ```
 
 `topping_entities` is scanner-derived index state. For a `.url`, `entity_key`
-is the effective ADR-026 entity key; it is never `toppings.content_hash`, which
-identifies the carrier file's bytes for move reconciliation. `alias_key` is the
-former trimmed-URL hash and therefore bridges pre-v6 marks. Generic tracking
+is the effective ADR-026 candidate bridge; despite the column name it is not a
+durable private or Catalog Waffle entity ID. It is never
+`toppings.content_hash`, which identifies the carrier file's bytes for move
+reconciliation. `alias_key` is the former trimmed-URL hash and therefore
+bridges pre-v6 marks. Generic tracking
 normalization and the documented Google Maps `query_place_id` adapter run
 offline during scan. If convergence would overwrite a different personal mark,
 the alias remains effective and `state='conflict'`. This separation lets URL

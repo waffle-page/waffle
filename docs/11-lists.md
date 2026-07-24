@@ -23,12 +23,13 @@ Exactly Spotify's library-vs-playlist split. schema.org type: `ItemList`
 It lives in a folder, gets a thumbnail (grid of member thumbs), is shareable,
 taggable, ratable, and statusable like anything else. Vault representation:
 a diffable `.list` file (JSON: title, ordered flag, member refs) — the Finder
-covenant holds. Member refs: topping ids for local items, entity keys for
-catalog items.
+covenant holds. Member refs: durable topping IDs for local items, opaque
+Catalog entity IDs for remote items. ADR-026 URL candidate hashes are never
+valid durable List references.
 
 ## Derived progress (the Coursera semantics)
 
-Interactions are entity-keyed (09), so each member carries its own status
+Interactions resolve through durable entity IDs (09), so each member carries its own status
 ("watched"). The List's status is **derived, not stored**: none started →
 queued · any started → active with `3/12` progress · all done → done.
 One roll-up query; manual override allowed. Any type of member works — videos,
@@ -48,4 +49,5 @@ first; hosting is a later paid-tier business decision, never a default.
 ## Sequencing
 
 Local Lists + `.list` files + derived progress: cheap, P2-adjacent.
-Published/discoverable Lists: P3 (rides catalog + accounts + verified tiers).
+Published/discoverable Lists: a later Catalog product integration (rides
+accounts, explicit publication, and verified tiers).

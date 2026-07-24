@@ -1,4 +1,4 @@
-# Acceptance specification: URL aliases and entity identity
+# Acceptance specification: URL aliases and candidate identity
 
 Executable contract for ADR-026's deterministic URL-identity slice. It is
 deliberately narrower than generic URL canonicalization: absence of strong
@@ -9,13 +9,16 @@ evidence means separate entities.
 The implemented local pipeline is:
 
 ```text
-raw saved URL → versioned normalized alias → provider key → local entity
+raw saved URL → versioned normalized alias → provider evidence
+                                            → effective candidate bridge
 ```
 
-Full semantic clustering across different providers remains P3. For example,
-automatically proving that a restaurant's Google Maps listing and its official
-website are the same entity is out of this slice; an eventual manual **Same
-thing** action may record that relationship earlier.
+The final key is not a durable private or Catalog Waffle entity ID. Full
+semantic resolution across sources belongs to the separate Catalog product.
+For example, automatically proving that a restaurant's Google Maps listing and
+its official website are the same entity is out of this slice. An eventual
+private **Same thing** action must write through the generic portable
+entity/identifier/claim substrate rather than a URL-specific sidecar.
 
 The Google adapter recognizes only the documented Maps Search URL shape:
 `/maps/search/?api=1&query=…&query_place_id=…`, with exactly one Place ID.
@@ -36,8 +39,9 @@ coordinates are deliberately not interpreted.
    map route, or other distinct resource.
 6. Provider adapters merge only on stable, high-confidence identifiers. Place
    names or nearby coordinates alone never auto-merge.
-7. A provider identifier may be superseded. Verified successor IDs join the
-   existing entity while the old identifier remains an alias.
+7. A provider identifier may be superseded. In the future generic substrate,
+   verified succession preserves both identifier claims without re-keying the
+   Waffle entity.
 8. Personal marks attach to the resolved entity. Every alias for that entity
    displays the same status and rating without per-card queries or hashing.
 9. Joining aliases is conflict preserving. Two different marks for the same
@@ -104,5 +108,7 @@ ADR-026 settles deterministic sub-slice A:
 - scan never performs network I/O or emits catalog/location telemetry.
 
 GitHub issue #1 remains open for sub-slice B: durable manual/network evidence,
-short-link resolution, provider-ID succession, conflict UI, and the interaction
-with ADR-022 identity plus encrypted sync.
+short-link resolution, provider-ID succession, and conflict UI. That work is
+sequenced behind ADR-027's generic portable private entity/identifier/claim
+substrate and the separate Catalog product boundary in
+`docs/16-catalog-product-and-entity-graph.md`.

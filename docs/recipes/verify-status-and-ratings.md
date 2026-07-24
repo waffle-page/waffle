@@ -9,8 +9,8 @@ Executable specification for the personal-marks projection in
 1. A mark belongs to `(owner, entity, status set)`, never to a topping or
    shared frontmatter property.
 2. A URL alias begins as the trimmed-URL hash, then ADR-026 may resolve it to a
-   deterministic entity key. Neither is the `.url` carrier's
-   `toppings.content_hash`.
+   deterministic effective candidate. Neither is a durable Waffle entity ID or
+   the `.url` carrier's `toppings.content_hash`.
 3. `topping_entities` is disposable scanner output. Full scan and
    `rescanFile` reconstruct it without changing user files.
 4. Renderers receive presentation-ready marks and perform no DB/entity work.
@@ -20,8 +20,10 @@ Executable specification for the personal-marks projection in
 
 Migration v6 adds allowlisted tracking normalization and a bounded Google Maps
 Place-ID adapter. Short links, redirects, undocumented provider identifiers,
-and cross-provider clustering remain deferred as specified in
-`verify-url-entity-identity.md`.
+and manual aliases remain deferred behind the generic private entity/claim
+substrate; cross-source resolution belongs to the separate Catalog product.
+See `verify-url-entity-identity.md` and
+`../16-catalog-product-and-entity-graph.md`.
 
 ## Fixture exercise
 

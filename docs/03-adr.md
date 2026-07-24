@@ -132,6 +132,37 @@ that alias from converging; both inputs remain addressable until a future
 conflict-resolution surface exists. If a later rule changes an already-shared
 candidate that carries marks, scan retains the prior effective entity rather
 than guessing whether those marks belong to other aliases. Network/manual
-aliases, obsolete provider
-ID succession, durable interaction storage, and encrypted multi-device
-identity require the still-open design gate in GitHub issue #1 before code.
+aliases, obsolete provider-ID succession, durable interaction storage, and
+encrypted multi-device identity require the still-open design gate in GitHub
+issue #1 before code. ADR-027 additionally requires those durable forms to use
+the generic private entity/identifier/claim substrate.
+
+## ADR-027 — The provider-neutral Catalog is a separate proprietary product
+Waffle Core remains a complete local-first library with no runtime dependency
+on the Catalog. The master entity/claim graph, resolution, ranking,
+aggregation, moderation, and corpus are a separate proprietary product behind
+ADR-019's private server boundary. The shared schema vocabulary and
+contribution protocol remain open and auditable; public discovery access does
+not make the underlying corpus open data.
+
+Catalog entity IDs are opaque, stable, and Waffle-controlled. URLs and
+external identifiers—including ISBNs, GTINs, DOIs, IMDb IDs, MusicBrainz IDs,
+Place IDs, merchant SKUs, and creator IDs—are claims with provenance,
+confidence, observed/valid time, rights, and succession state, never permanent
+identity. Facts, typed relationships, and media use the same claim discipline.
+Merges create redirects, splits and disputes preserve history, and an explicit
+**Same thing** operation never rewrites raw user files.
+
+Private local evidence and owner overlays remain separate from the public
+Catalog projection. Contributions require a distinct ceremony and exclude
+private entity IDs, exact location, folder/co-save context, IP history, and a
+stable public user identifier. Catalog acquisition is limited to
+user-initiated actions, permitted metadata and APIs, feeds, licensed/open
+datasets, standards, and partnerships; unauthorized bulk crawling,
+authentication/quota circumvention, private-API imitation, and indiscriminate
+republication are not foundations.
+
+ADR-026's hashed `entity_key` remains a disposable local candidate bridge, not
+a durable Waffle or Catalog entity ID. URL sub-slice B waits for a generic
+portable private entity/identifier/claim substrate and its implementation ADR.
+Full contract: `docs/16-catalog-product-and-entity-graph.md`.

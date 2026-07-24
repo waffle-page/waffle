@@ -1,8 +1,8 @@
 /**
  * One table cell: kind-aware display + inline editor. Presentation only — the
  * parent owns which cell is editing and what a commit does. Editors are plain
- * HTML inputs on purpose (dependency budget): the native date picker and
- * number keypad beat anything we would hand-roll.
+ * HTML inputs on purpose (dependency budget): native date input plus decimal
+ * inputMode provide the useful platform affordances without number steppers.
  */
 import { useId, useRef, useState, type CSSProperties } from 'react';
 import type { PropertyValue } from '@waffle/core';
@@ -116,7 +116,10 @@ function editorInitial(p: PropertyValue | undefined): string {
   }
 }
 
-const INPUT_TYPE: Partial<Record<PropertyValue['kind'], string>> = { number: 'number', money: 'number', date: 'date' };
+// Number/money intentionally remain text inputs with decimal inputMode. Native
+// number inputs expose browser steppers even when the property declares no
+// meaningful step; parsing/validation remains explicit below.
+const INPUT_TYPE: Partial<Record<PropertyValue['kind'], string>> = { date: 'date' };
 
 export interface PropertyCellProps {
   /** Accessible column name for the native editor. */
@@ -233,7 +236,6 @@ function CellEditor({ label, kind, currency, options, initial, onCommit, onCance
         autoFocus
         type={nativeType}
         inputMode={kind === 'number' || kind === 'money' ? 'decimal' : undefined}
-        step={kind === 'money' ? '0.01' : kind === 'number' ? 'any' : undefined}
         list={listId}
         value={raw}
         placeholder={kind === 'list' ? '["value","value"]' : undefined}
