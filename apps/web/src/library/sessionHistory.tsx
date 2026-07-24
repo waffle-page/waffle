@@ -68,6 +68,8 @@ export interface SessionHistoryController {
   redo: () => Promise<void>;
   clear: () => void;
   invalidate: () => void;
+  /** Clears only the visible warning/error; history receipts remain intact. */
+  dismissError: () => void;
 }
 
 const SessionHistoryContext = createContext<SessionHistoryController | null>(null);
@@ -312,6 +314,7 @@ export function useSessionHistoryController(
 
   const undo = useCallback(() => replay('undo'), [replay]);
   const redo = useCallback(() => replay('redo'), [replay]);
+  const dismissError = useCallback((): void => setError(null), []);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
@@ -344,7 +347,8 @@ export function useSessionHistoryController(
     redo,
     clear,
     invalidate,
-  }), [busy, clear, error, invalidate, redo, runRecordedMutation, stacks.redo, stacks.undo, undo]);
+    dismissError,
+  }), [busy, clear, dismissError, error, invalidate, redo, runRecordedMutation, stacks.redo, stacks.undo, undo]);
 }
 
 export function SessionHistoryProvider({

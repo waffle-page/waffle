@@ -297,6 +297,10 @@ Record the commit, browser, spreadsheet application, and fixture topping count.
 - Trigger several fast edits while observing the busy/error surface. It must
   not report idle while a write is pending or let an older failure roll back a
   newer successful optimistic patch.
+- Select a note, choose a bulk property, leave its value blank, and press
+  **Apply**. Confirm an alert appears without replacing the table. Dismiss it;
+  the message disappears, the row remains selected, and undo/redo state is
+  unchanged.
 
 ### 7. Column resize, reorder, sticky Title, and migration
 

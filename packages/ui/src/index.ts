@@ -16,6 +16,7 @@ export {
 export { PropertyTable, TITLE_SORT_KEY, type PropertyTableProps, type TableColumn, type TableRowData } from './PropertyTable';
 export type { TableGridCell } from './tableGridState';
 export { PropertyCell, formatProperty, parseCellInput, EDITABLE_KINDS, type CellInputParseResult, type EditablePropertyKind } from './PropertyCell';
+export { DismissibleNotice, type DismissibleNoticeProps } from './DismissibleNotice';
 export { ViewTabs, type ViewTabInfo, type ViewTabsProps } from './ViewTabs';
 export { FilterPopover, type FilterField, type FilterCondition, type FilterPopoverProps } from './FilterPopover';
 export { ToppingCard, clampAspect } from './ToppingCard';

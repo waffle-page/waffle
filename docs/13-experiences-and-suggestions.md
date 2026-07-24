@@ -167,6 +167,10 @@ Small but binding table polish belongs in the same P1 hardening slice:
   property that declares a meaningful step.
 - Operation/detail panels, including the current table-operations surface, are
   closable and do not steal permanent width from the library.
+- Until Activity & Issues replaces scattered feedback, library, history, and
+  table-operation failures use one dismissible semantic notice. Dismissal
+  clears only presentation state: it never clears history receipts, retries,
+  canonical files, or the current table selection.
 
 ## Renderer implications
 

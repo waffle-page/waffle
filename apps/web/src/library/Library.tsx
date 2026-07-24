@@ -6,7 +6,17 @@
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { FilterNode } from '@waffle/core';
-import { FilterPopover, getLayout, listLayouts, ViewTabs, type FilterCondition, type FilterField, type LibraryItem, type TableViewConfig } from '@waffle/ui';
+import {
+  DismissibleNotice,
+  FilterPopover,
+  ViewTabs,
+  getLayout,
+  listLayouts,
+  type FilterCondition,
+  type FilterField,
+  type LibraryItem,
+  type TableViewConfig,
+} from '@waffle/ui';
 import { getVaultFs, platform, platformReady, setVaultFs, type PlatformStatus } from '../platform/instance';
 import { fsAccessSupported, pickRealFolder, restoreRealFolder } from '../platform/web/fsAccessFs';
 import { inFolderFilter, loadPropertyKeys, type ViewCfg } from './queries';
@@ -130,6 +140,7 @@ export function Library() {
   }, []);
 
   const onAdd = async (action: AddAction): Promise<void> => {
+    setError(null);
     try {
       // Note/link/file creation is canonical but not yet reversible. Clear
       // older inverses before the first write so undo never crosses it.
@@ -170,6 +181,7 @@ export function Library() {
   };
 
   const onPickFolder = async (): Promise<void> => {
+    setError(null);
     try {
       const fs = await pickRealFolder();
       sessionHistory.clear();
@@ -255,9 +267,14 @@ export function Library() {
           <h1 style={{ fontSize: '1.05rem', margin: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{folderName}</h1>
           <span style={{ color: 'var(--text-dim)', fontSize: '0.8rem' }}>{items === null ? '…' : items.length.toLocaleString()}</span>
           {sessionHistory.error && (
-            <span role="alert" style={{ color: 'var(--ink-blush)', fontSize: '0.75rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            <DismissibleNotice
+              compact
+              dismissLabel="Dismiss history message"
+              onDismiss={sessionHistory.dismissError}
+              style={{ maxWidth: 'min(38vw, 480px)' }}
+            >
               {sessionHistory.error}
-            </span>
+            </DismissibleNotice>
           )}
           <div style={{ marginLeft: 'auto', display: 'flex', gap: 6, alignItems: 'center' }}>
             <button
@@ -363,9 +380,16 @@ export function Library() {
         )}
 
         <div style={{ flex: 1, minHeight: 0, background: 'var(--bg)', position: 'relative' }} onDragOver={(e) => e.preventDefault()} onDrop={onDrop}>
-          {error ? (
-            <pre style={{ color: 'var(--ink-blush)', padding: '1rem', whiteSpace: 'pre-wrap' }}>{error}</pre>
-          ) : items === null ? null : items.length === 0 && layout.key !== 'table' && conditionCount === 0 ? (
+          {error && (
+            <DismissibleNotice
+              dismissLabel="Dismiss library message"
+              onDismiss={() => setError(null)}
+              style={{ position: 'absolute', top: 12, left: 12, right: 12, zIndex: 9, boxShadow: 'var(--shadow-menu-soft)' }}
+            >
+              {error}
+            </DismissibleNotice>
+          )}
+          {items === null ? null : items.length === 0 && layout.key !== 'table' && conditionCount === 0 ? (
             // The table renders even empty (its ghost row IS the add affordance,
             // docs/12), and a filtered-to-zero view must show its zero.
             <div style={{ padding: '3rem 1rem', textAlign: 'center', color: 'var(--text-dim)' }}>

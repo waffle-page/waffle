@@ -10,8 +10,19 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { loadPropertyTypes, savePropertyTypes, type PropertyTypes, type PropertyValue } from '@waffle/core';
 import {
-  EDITABLE_KINDS, PropertyTable, TABLE_COLUMN_DEFAULT_WIDTH, TableIcon, parseCellInput, registerLayout,
-  type EditablePropertyKind, type LayoutProps, type TableColumn, type TableColumnConfig, type TableGridCell, type TableRowData,
+  DismissibleNotice,
+  EDITABLE_KINDS,
+  PropertyTable,
+  TABLE_COLUMN_DEFAULT_WIDTH,
+  TableIcon,
+  parseCellInput,
+  registerLayout,
+  type EditablePropertyKind,
+  type LayoutProps,
+  type TableColumn,
+  type TableColumnConfig,
+  type TableGridCell,
+  type TableRowData,
 } from '@waffle/ui';
 import { getVaultFs } from '../platform/instance';
 import { loadPropertyMap, vaultDirFor } from './queries';
@@ -397,7 +408,16 @@ function TableLayout({ items, groups, folderId = null, crossFolder = false, onOp
               <button onClick={() => { setSelected(new Set<string>()); setConfirmDelete(false); }} style={chipStyle}>Deselect</button>
             </>
           )}
-          {error && <span role="alert" style={{ color: 'var(--ink-blush)', marginLeft: 'auto' }}>{error}</span>}
+          {error && (
+            <DismissibleNotice
+              compact
+              dismissLabel="Dismiss table message"
+              onDismiss={() => setError(null)}
+              style={{ marginLeft: 'auto', maxWidth: 'min(50vw, 640px)' }}
+            >
+              {error}
+            </DismissibleNotice>
+          )}
         </div>
       )}
 

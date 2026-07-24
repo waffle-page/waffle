@@ -236,12 +236,18 @@ opaque across horizontal scroll and selection states. Numeric cell, bulk, and
 filter editors use decimal text input with explicit validation rather than
 undeclared native steppers.
 
+**P1 transient feedback hardening shipped (2026-07-24):** library, session
+history, and table-operation failures share one accessible dismissible notice.
+Library failures no longer replace the workspace, and dismissal clears only
+the visible message—not selection, history receipts, retry state, or canonical
+files. Activity & Issues will later absorb these scattered surfaces.
+
 **Next, in agreed order:**
 
-1. **P1 usability shell**: dismissible transient panels; visible Trash;
-   Activity & Issues for sync/operation errors; This folder / All saved search
-   over existing FTS; and the responsive bottom-right Add capture sheet.
-   Preserve table ghost-row and all interaction regressions.
+1. **P1 usability shell**: visible Trash; Activity & Issues for sync/operation
+   errors; This folder / All saved search over existing FTS; and the responsive
+   bottom-right Add capture sheet. Preserve table ghost-row and all interaction
+   regressions.
 2. **Settings + durable object identity**: theme palette plus
    locale/timezone/week-start/unit/
    currency preferences; then durable vault/folder/topping identity under
