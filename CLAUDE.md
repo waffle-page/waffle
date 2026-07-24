@@ -143,6 +143,16 @@ replacement, and note creation remains explicitly outside the inverse surface.
 The stack/replay invariants and live procedure are in
 `docs/recipes/verify-table-interactions.md`.
 
+**Slice C hardening complete:** replay validates targeted canonical property
+values before and inside the serialized write boundary, while preserving
+unrelated edits. Multi-file forward/replay failures retain truthful partial
+receipts; post-write rescan failures surface without losing the inverse.
+Unrecorded full-note, creation, asset, and declaration writes form explicit
+history barriers. The stack is capped at 100 entries/8 MB. Note-editor saves
+serialize, dirty deletion flushes before trash, and failed deletion leaves the
+draft recoverable. The dev harness provides an external-property conflict
+probe for the executable acceptance procedure.
+
 **Next, in agreed order:**
 
 1. **P1 remainder**: status/ratings surfacing in library views (chips +

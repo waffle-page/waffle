@@ -40,8 +40,10 @@ complete until this specification passes, along with typecheck and build.
 8. Busy state covers writes, rescans, and requeries. Intermediate refreshes
    must not replace newer optimistic patches; the last outstanding mutation
    reconciles the visible property map with the SQLite mirror.
-9. History records only after the file write and targeted rescan settle.
-   Undo/redo re-enters `vaultMutations`; React never applies inverse patches.
+9. History records only completed canonical file changes. A targeted rescan
+   failure is a visible projection warning, not permission to forget the file
+   change; undo/redo must still remain truthful. React never applies inverse
+   patches.
 10. A forward command in flight blocks replay. Concurrent commands enter the
     undo stack in gesture-start order, regardless of I/O completion order.
 11. A successful new recorded command clears redo. Reload or active-vault
@@ -54,6 +56,25 @@ complete until this specification passes, along with typecheck and build.
 14. Slice C reverses property patches and soft deletes. Overflow/ghost-row
     note creation is not reversible; a mixed paste undoes its existing-row
     property patches but does not trash the notes it created.
+15. Undo/redo validates the current canonical value of every targeted property
+    before its first write, then validates again inside the per-path write
+    queue. A changed target freezes safely; unrelated body/property edits do
+    not block replay and must be preserved.
+16. If a multi-file command fails after a prefix completed, that prefix enters
+    history as a partial receipt. If replay itself fails after a prefix, the
+    applied and remaining halves occupy opposite stack heads. Retrying must
+    never apply one file twice.
+17. Full-note saves, note/link/file creation, asset creation, and property-type
+    changes invalidate older history before writing because they do not yet
+    have complete inverse receipts. A mixed paste starts a new epoch, then
+    records only its reversible existing-row patches.
+18. History retains at most 100 entries and 8 MB of serialized receipts. An
+    individually oversized gesture completes but is omitted with a visible
+    warning; older usable entries remain.
+19. Deleting an open note awaits any in-flight save and flushes its current
+    draft before moving the file. If save or delete fails, the editor stays
+    open with the draft recoverable (dirty if it was not flushed); a delayed
+    save must never resurrect the moved path.
 
 ```mermaid
 flowchart LR
@@ -314,7 +335,8 @@ Record the commit, browser, spreadsheet application, and fixture topping count.
   returns to its original path and the row reappears; redo and confirm the
   same original/trash path pair is used.
 - Delete a note from the editor, then undo from the library. Confirm its
-  pending debounced save did not resurrect or overwrite the restored note.
+  latest draft is present in the restored note and no delayed save resurrects
+  or overwrites it.
 - After undoing a delete, create a file manually at the stored trash path and
   attempt redo. Confirm Waffle refuses the collision, preserves both files,
   surfaces an error, and leaves Redo available. Remove only that deliberate
@@ -322,6 +344,23 @@ Record the commit, browser, spreadsheet application, and fixture topping count.
 - Paste across existing rows with overflow creation, then undo. Confirm
   existing properties revert and the created notes remain; creation is
   explicitly outside Slice C.
+- In the library tab, edit Pasta alla Norma's `rating`. In a second same-origin
+  `?dev` tab, select **Simulate property conflict**; do not scan. Back in the
+  library, attempt Undo. Confirm it refuses because `rating` changed in the
+  canonical file, leaves Undo available, and does not overwrite the external
+  value. The second tab may report an in-memory SQLite fallback because the web
+  VFS is single-tab; the probe uses only the shared vault-file seam. Scan only
+  after observing the refusal, then confirm 9.25 or 9.5.
+- Repeat, but externally change only the note body. Undo must succeed and the
+  external body line must remain: conflict checks cover targeted properties,
+  not whole-file hashes.
+- Edit a property, then modify and save any note in the note editor. Confirm
+  the older property Undo entry is cleared. Repeat with ghost-row creation,
+  spreadsheet append, and a new property column.
+- With a dirty open note, confirm delete. Undo from the library and inspect the
+  restored file: it must contain the last editor draft. If exercising an
+  injected write/remove failure, confirm the editor remains open with the
+  draft still present.
 - Reload the page and confirm both history controls reset. Never switch to a
   real personal folder to test vault-reset behavior.
 
@@ -389,5 +428,6 @@ Table acceptance:
 - Resize/reorder/sticky/migration: PASS|FAIL
 - Fill-down + row-batched writes: PASS|FAIL
 - Property/delete undo + redo/native-editor isolation/collision safety: PASS|FAIL
+- History conflict/partial/barrier/bounds + dirty-delete safety: PASS|FAIL
 - List edit/copy/paste/inference + unsupported-structure safety: PASS|FAIL
 ```

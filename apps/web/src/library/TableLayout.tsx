@@ -29,7 +29,13 @@ import {
   type TableOperationPlan,
 } from './tableOperations';
 import { useSessionHistory } from './sessionHistory';
-import { commitTableOperation, createEmptyNote, trashVaultFiles } from './vaultMutations';
+import {
+  commitTableOperation,
+  createEmptyNote,
+  mutationWarningsMessage,
+  trashVaultFiles,
+  type MutationWarning,
+} from './vaultMutations';
 
 type PropMap = Map<string, Record<string, PropertyValue>>;
 
@@ -175,6 +181,11 @@ function TableLayout({ items, groups, folderId = null, crossFolder = false, onOp
     }
   };
 
+  const surfaceMutationWarnings = (warnings: MutationWarning[]): void => {
+    const warning = mutationWarningsMessage(warnings);
+    if (warning) setError(warning);
+  };
+
   const perform = (
     plan: TableOperationPlan,
     historyLabel: string,
@@ -186,10 +197,14 @@ function TableLayout({ items, groups, folderId = null, crossFolder = false, onOp
       return;
     }
     void run(async () => {
-      await history.capture(
+      // Creation has no inverse yet. It starts a new history epoch before a
+      // mixed paste records the independently reversible property patches.
+      if (plan.creates.length > 0) history.invalidate();
+      const receipt = await history.runRecordedMutation(
         historyLabel,
         async () => commitTableOperation(await getVaultFs(), dir, plan),
       );
+      surfaceMutationWarnings(receipt.warnings);
     }, notice);
   };
 
@@ -200,7 +215,9 @@ function TableLayout({ items, groups, folderId = null, crossFolder = false, onOp
   const onCreateRow = (title: string): void => {
     if (dir === null) return;
     void run(async () => {
-      await createEmptyNote(await getVaultFs(), dir, title);
+      history.invalidate();
+      const receipt = await createEmptyNote(await getVaultFs(), dir, title);
+      surfaceMutationWarnings(receipt.warnings);
     });
   };
 
@@ -256,6 +273,9 @@ function TableLayout({ items, groups, folderId = null, crossFolder = false, onOp
     if (dir === null || grid.length === 0) return;
     const plan = planPasteAppend(grid, columns, types);
     void run(async () => {
+      // Spreadsheet append creates notes and may change property declarations;
+      // neither mutation class has an inverse in the current session history.
+      history.invalidate();
       const fs = await getVaultFs();
       if (Object.keys(plan.addedTypes).length > 0) {
         const nextTypes = { ...types, ...plan.addedTypes };
@@ -263,10 +283,8 @@ function TableLayout({ items, groups, folderId = null, crossFolder = false, onOp
         setTypes(nextTypes);
         if (plan.columns) onTableConfig?.({ columns: plan.columns });
       }
-      await history.capture(
-        'Append spreadsheet rows',
-        async () => commitTableOperation(fs, dir, plan),
-      );
+      const receipt = await commitTableOperation(fs, dir, plan);
+      surfaceMutationWarnings(receipt.warnings);
     }, pasteNotice(plan.invalid));
   };
 
@@ -274,6 +292,7 @@ function TableLayout({ items, groups, folderId = null, crossFolder = false, onOp
     const key = name.trim();
     if (!key || key.startsWith('$') || columns.some((c) => c.key === key)) return;
     void run(async () => {
+      history.invalidate();
       const decl = kind === 'money' ? { kind, currency: currency.trim().toUpperCase() || 'EUR' } : { kind };
       const fs = await getVaultFs();
       const next = { ...types, [key]: decl };
@@ -295,10 +314,11 @@ function TableLayout({ items, groups, folderId = null, crossFolder = false, onOp
     setConfirmDelete(false);
     setSelected(new Set<string>());
     void run(async () => {
-      await history.capture(
+      const receipt = await history.runRecordedMutation(
         `Delete ${targets.length} item${targets.length === 1 ? '' : 's'}`,
         async () => trashVaultFiles(await getVaultFs(), targets.map((target) => target.item.contentRef!)),
       );
+      surfaceMutationWarnings(receipt.warnings);
     });
   };
 

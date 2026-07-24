@@ -3,7 +3,7 @@
  * exercises for P0 steps 1–3. The library UI is the app's real face.
  */
 import { useEffect, useRef, useState } from 'react';
-import { scanVault, type ScanResult } from '@waffle/core';
+import { scanVault, updateFrontmatter, type ScanResult } from '@waffle/core';
 import { getVaultFs, platform, platformReady } from './platform/instance';
 import { runThumbnailer } from './thumbs/thumbnailer';
 import { seed } from './dev/seed';
@@ -169,6 +169,18 @@ export function DevHarness() {
       setBusy('external edit written — watcher (if on) will pick it up');
     });
 
+  const onExternalPropertyEdit = () =>
+    guard('changing pasta rating outside the index…', async () => {
+      const fs = await getVaultFs();
+      const path = 'Recipes/pasta-alla-norma.md';
+      const text = new TextDecoder().decode(await fs.read(path));
+      const rating = /^rating:\s*9\.25$/m.test(text) ? 9.5 : 9.25;
+      // Deliberately do not rescan: this models Obsidian changing the canonical
+      // file while another Waffle tab still holds an undo receipt.
+      await fs.write(path, new TextEncoder().encode(updateFrontmatter(text, { rating })));
+      setBusy(`external rating ${rating} written — do not scan before testing conflict freeze`);
+    });
+
   const onMove = () =>
     guard('moving tiramisu…', async () => {
       const fs = await getVaultFs();
@@ -247,6 +259,7 @@ export function DevHarness() {
           <button style={btn} onClick={onScan} disabled={!status}>Scan vault</button>
           <button style={btn} onClick={() => void onWatchToggle()} disabled={!status}>{watching ? '● Watching (stop)' : 'Watch changes'}</button>
           <button style={btn} onClick={onExternalEdit} disabled={!status}>Simulate external edit</button>
+          <button style={btn} onClick={onExternalPropertyEdit} disabled={!status}>Simulate property conflict</button>
           <button style={btn} onClick={onMove} disabled={!status}>Move tiramisu</button>
         </div>
         {scan && (

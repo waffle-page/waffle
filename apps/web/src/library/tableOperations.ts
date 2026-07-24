@@ -3,9 +3,9 @@
  *
  * React and vault I/O stop here. Every planner converts a gesture into
  * row-batched note patches plus optional note creations. A patch carries both
- * before and after values: the UI uses `after` optimistically today, and Slice
- * C can record the same plan as an inverse patch without reconstructing state
- * after files have changed.
+ * before and after values: the UI uses `after` optimistically, and session
+ * history records the same plan without reconstructing state after files have
+ * changed.
  *
  * Invariants:
  *  - at most one patch per note;

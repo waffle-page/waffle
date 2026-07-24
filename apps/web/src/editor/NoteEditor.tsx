@@ -16,6 +16,7 @@ import { EditorView, basicSetup } from 'codemirror';
 import { markdown } from '@codemirror/lang-markdown';
 import { rescanFile } from '@waffle/core';
 import { getVaultFs, platform } from '../platform/instance';
+import { uniquePath } from '../library/addFlows';
 import { useSessionHistory } from '../library/sessionHistory';
 import { trashVaultFiles } from '../library/vaultMutations';
 import { vaultUrl, mimeFor } from './assetUrl';
@@ -50,6 +51,9 @@ export function NoteEditor({
   const viewRef = useRef<EditorView | null>(null);
   const textRef = useRef('');
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const saveInFlightRef = useRef<Promise<void> | null>(null);
+  const editRevisionRef = useRef(0);
+  const savedRevisionRef = useRef(0);
   const [loaded, setLoaded] = useState(false);
   const [mode, setMode] = useState<Mode>('edit');
   const [savedAt, setSavedAt] = useState<string | null>(null);
@@ -58,12 +62,37 @@ export function NoteEditor({
   const [notice, setNotice] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
 
-  const save = async (content: string): Promise<void> => {
-    const fs = await getVaultFs();
-    await fs.write(path, new TextEncoder().encode(content));
-    await rescanFile(platform.db, fs, path); // index mirrors the file NOW, not at the next full scan
-    setDirty(false);
-    setSavedAt(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
+  const save = (content: string): Promise<void> => {
+    const revision = editRevisionRef.current;
+    const previous = saveInFlightRef.current ?? Promise.resolve();
+    // Whole-note saves must serialize: a slow older write completing after a
+    // newer one would otherwise restore stale bytes over the user's draft.
+    const task = previous.catch(() => undefined).then(async () => {
+      history.invalidate();
+      const fs = await getVaultFs();
+      await fs.write(path, new TextEncoder().encode(content));
+      await rescanFile(platform.db, fs, path); // index mirrors the file NOW, not at the next full scan
+      savedRevisionRef.current = revision;
+      if (editRevisionRef.current === revision) setDirty(false);
+      setSavedAt(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
+    });
+    saveInFlightRef.current = task;
+    void task.then(
+      () => {
+        if (saveInFlightRef.current === task) saveInFlightRef.current = null;
+      },
+      () => {
+        if (saveInFlightRef.current === task) saveInFlightRef.current = null;
+      },
+    );
+    return task;
+  };
+
+  const requestSave = (content: string): void => {
+    void save(content).catch((error) => {
+      setDirty(true);
+      setNotice(`Save failed: ${error instanceof Error ? error.message : String(error)}`);
+    });
   };
 
   /** Pasted/dropped files → vault files beside the note + `![[…]]` embeds at `at`. */
@@ -73,34 +102,50 @@ export function NoteEditor({
     const fmEnd = /^---\r?\n[\s\S]*?\r?\n---\r?\n?/.exec(view.state.doc.toString())?.[0].length ?? 0;
     at = Math.max(at, fmEnd);
     const fs = await getVaultFs();
+    // Asset creation has no inverse patch; invalidate property/delete history
+    // before the first canonical write rather than retaining a stale stack.
+    history.invalidate();
     const noteDir = path.split('/').slice(0, -1).join('/');
     const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
     let insert = '';
     for (const [i, file] of files.entries()) {
       const dot = file.name.lastIndexOf('.');
       const ext = dot > 0 ? file.name.slice(dot) : EXT_FROM_MIME[file.type] ?? '';
-      const name = `${title}-paste-${stamp}${files.length > 1 ? `-${i + 1}` : ''}${ext}`;
-      await fs.write(noteDir ? `${noteDir}/${name}` : name, new Uint8Array(await file.arrayBuffer()));
-      await rescanFile(platform.db, fs, noteDir ? `${noteDir}/${name}` : name);
+      const base = `${title}-paste-${stamp}${files.length > 1 ? `-${i + 1}` : ''}`;
+      // Same-second pastes must never overwrite an earlier user asset.
+      const assetPath = await uniquePath(fs, noteDir, base, ext);
+      const name = assetPath.split('/').pop()!;
+      await fs.write(assetPath, new Uint8Array(await file.arrayBuffer()));
+      await rescanFile(platform.db, fs, assetPath);
       insert += `![[${name}]]\n`;
     }
     view.dispatch({ changes: { from: at, insert } });
     setNotice(`embedded ${files.length} file${files.length > 1 ? 's' : ''}`);
   };
 
-  /** Move the note to .trash/. The pending save MUST be cancelled first — a
-   * debounced write landing after the move would resurrect the file. */
+  /** Flush the current draft, then move the note to .trash/.
+   * The timer is cancelled and any dispatched save is awaited first: a write
+   * landing after the move would resurrect the source path. */
   const onDelete = async (): Promise<void> => {
     if (saveTimerRef.current) {
       clearTimeout(saveTimerRef.current);
       saveTimerRef.current = null;
     }
-    setDirty(false);
     try {
-      await history.capture(
+      // A save whose timer already fired cannot be cancelled. Await it before
+      // moving the note or its eventual write could resurrect the source path.
+      // Flush a still-debounced draft as well, so undo restores the bytes the
+      // user actually deleted rather than an older autosave.
+      if (saveInFlightRef.current) await saveInFlightRef.current;
+      const view = viewRef.current;
+      if (savedRevisionRef.current !== editRevisionRef.current) {
+        await save(view ? view.state.doc.toString() : textRef.current);
+      }
+      await history.runRecordedMutation(
         'Delete note',
         async () => trashVaultFiles(await getVaultFs(), [path]),
       );
+      setDirty(false);
       onClose();
     } catch (error) {
       setConfirmDelete(false);
@@ -116,8 +161,14 @@ export function NoteEditor({
     }
     const view = viewRef.current;
     const text = view ? view.state.doc.toString() : textRef.current;
-    if (dirty) await save(text);
-    onClose();
+    try {
+      if (saveInFlightRef.current) await saveInFlightRef.current;
+      if (savedRevisionRef.current !== editRevisionRef.current) await save(text);
+      onClose();
+    } catch (error) {
+      setDirty(true);
+      setNotice(`Save failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
   };
 
   useEffect(() => {
@@ -161,7 +212,9 @@ export function NoteEditor({
             const files = [...(event.clipboardData?.files ?? [])];
             if (files.length === 0 || event.clipboardData?.getData('text/plain')) return false;
             event.preventDefault();
-            void embedFiles(files, v, v.state.selection.main.head);
+            void embedFiles(files, v, v.state.selection.main.head).catch((error) => {
+              setNotice(`Embed failed: ${error instanceof Error ? error.message : String(error)}`);
+            });
             return true;
           },
           // Dropping onto the open note EMBEDS — without stopPropagation the
@@ -172,7 +225,9 @@ export function NoteEditor({
             event.preventDefault();
             event.stopPropagation();
             const at = v.posAtCoords({ x: event.clientX, y: event.clientY }) ?? v.state.selection.main.head;
-            void embedFiles(files, v, at);
+            void embedFiles(files, v, at).catch((error) => {
+              setNotice(`Embed failed: ${error instanceof Error ? error.message : String(error)}`);
+            });
             return true;
           },
           dragover: (event) => {
@@ -185,9 +240,13 @@ export function NoteEditor({
         EditorView.updateListener.of((update) => {
           if (!update.docChanged) return;
           textRef.current = update.state.doc.toString();
+          editRevisionRef.current += 1;
           setDirty(true);
           if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-          saveTimerRef.current = setTimeout(() => void save(textRef.current), SAVE_DEBOUNCE_MS);
+          saveTimerRef.current = setTimeout(() => {
+            saveTimerRef.current = null;
+            requestSave(textRef.current);
+          }, SAVE_DEBOUNCE_MS);
         }),
         EditorView.theme({
           '&': { height: '100%', fontSize: '0.9rem' },
@@ -202,7 +261,7 @@ export function NoteEditor({
       if (saveTimerRef.current) {
         clearTimeout(saveTimerRef.current);
         saveTimerRef.current = null;
-        void save(view.state.doc.toString());
+        requestSave(view.state.doc.toString());
       }
       viewRef.current = null;
       view.destroy();
@@ -217,7 +276,9 @@ export function NoteEditor({
       view.dispatch({ changes: { from: at, insert: snippet } });
     } else {
       textRef.current += snippet;
-      void save(textRef.current);
+      editRevisionRef.current += 1;
+      setDirty(true);
+      requestSave(textRef.current);
     }
   };
 
@@ -237,12 +298,17 @@ export function NoteEditor({
           setRecorder(null);
           const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
           const noteDir = path.split('/').slice(0, -1).join('/');
-          const name = `${title}-rec-${stamp}.webm`;
           const fs = await getVaultFs();
-          await fs.write(noteDir ? `${noteDir}/${name}` : name, new Uint8Array(await new Blob(chunks).arrayBuffer()));
+          const assetPath = await uniquePath(fs, noteDir, `${title}-rec-${stamp}`, '.webm');
+          const name = assetPath.split('/').pop()!;
+          history.invalidate();
+          await fs.write(assetPath, new Uint8Array(await new Blob(chunks).arrayBuffer()));
+          await rescanFile(platform.db, fs, assetPath);
           insertAtCursor(`\n![[${name}]]\n`);
           setNotice(`recorded ${name}`);
-        })();
+        })().catch((error) => {
+          setNotice(`Recording save failed: ${error instanceof Error ? error.message : String(error)}`);
+        });
       };
       rec.start();
       setRecorder(rec);

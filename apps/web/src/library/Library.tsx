@@ -124,6 +124,9 @@ export function Library() {
 
   const onAdd = async (action: AddAction): Promise<void> => {
     try {
+      // Note/link/file creation is canonical but not yet reversible. Clear
+      // older inverses before the first write so undo never crosses it.
+      sessionHistory.invalidate();
       const fs = await getVaultFs();
       const dir = targetDir;
       if (action.kind === 'note') {
@@ -137,6 +140,17 @@ export function Library() {
         await addFiles(fs, dir, action.files);
         await syncVault();
       }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  const onOpenImport = (): void => {
+    try {
+      // Sync may merge property declarations. That can change how an older
+      // property receipt parses, even when no note bytes change.
+      sessionHistory.invalidate();
+      setImportOpen(true);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
@@ -205,7 +219,7 @@ export function Library() {
           />
         </div>
         <button
-          onClick={() => setImportOpen(true)}
+          onClick={onOpenImport}
           title="Obsidian config syncs automatically at every scan — this shows the last result and any skipped constructs"
           style={{ margin: '0.5rem 0.75rem 0', padding: '0.4rem 0.6rem', fontSize: '0.78rem', background: 'var(--surface-2)', color: 'var(--text)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', cursor: 'pointer' }}
         >
