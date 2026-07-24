@@ -112,3 +112,26 @@ materialization; time-series sources (Oura) use canonical datasets. Source
 deletion flags rather than deletes, while a user's soft-delete creates a
 suppression tombstone so later pulls cannot resurrect it. Full reference flows:
 docs/15.
+
+## ADR-026 — URL identity is a versioned, evidence-bounded projection
+The exact URL in a user's `.url` file remains canonical and unchanged. During
+scan, a pure versioned normalizer derives a raw alias and candidate entity.
+Generic normalization removes only an explicit tracking-parameter allowlist;
+unknown parameters and fragments remain. Provider adapters may replace that
+candidate only with documented stable evidence. The first adapter recognizes
+an exact allowlist of Google Maps hosts and Search URLs carrying exactly one
+`query_place_id`; it does not
+interpret directions, shortened links, redirects, CID/data blobs, names, or
+coordinates. Scan performs no network I/O.
+
+`url_entity_aliases` and `topping_entities` are disposable projections. A
+normalizer-version change reprojects them from the vault. Existing personal
+marks move from a raw alias to its candidate only when the destination is empty
+or semantically identical. Differing marks for the same owner/status set block
+that alias from converging; both inputs remain addressable until a future
+conflict-resolution surface exists. If a later rule changes an already-shared
+candidate that carries marks, scan retains the prior effective entity rather
+than guessing whether those marks belong to other aliases. Network/manual
+aliases, obsolete provider
+ID succession, durable interaction storage, and encrypted multi-device
+identity require the still-open design gate in GitHub issue #1 before code.

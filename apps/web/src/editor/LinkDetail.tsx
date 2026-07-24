@@ -17,7 +17,7 @@ export function LinkDetail({ item, url, onClose }: { item: LibraryItem; url: str
 
   useEffect(() => {
     void (async () => {
-      setMarks(await loadMarks(url, null)); // schema_type joins at P2 extraction
+      setMarks(await loadMarks(item.id, url, null)); // schema_type joins at P2 extraction
       setProps(await loadToppingProps(item.id));
     })();
   }, [item.id, url]);

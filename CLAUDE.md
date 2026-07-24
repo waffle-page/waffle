@@ -169,20 +169,19 @@ serialize, dirty deletion flushes before trash, and failed deletion leaves the
 draft recoverable. The dev harness provides an external-property conflict
 probe for the executable acceptance procedure.
 
-**Status/rating library surface complete:** the scanner derives a disposable
-`topping_entities` URL-identity projection without conflating it with carrier
-file hashes. Masonry, grid, list, and table receive presentation-ready private
-marks and render compact status/rating badges. Saved views filter with **My
-status** and **My rating** through SQL; ordinary frontmatter `rating` remains a
-separate property. Universal status filtering matches a semantic slot on any
-axis; axis-specific sort/group waits for a control that names its status set.
-Executable acceptance: `docs/recipes/verify-status-and-ratings.md`.
-Known correctness boundary: v5 equates only identical trimmed URLs. The next
-slice must introduce the raw-URL → alias → entity seam so variants for the same
-Google Maps Place share marks. It must not merely strip all query parameters or
-replace one temporary hash with another; requirements and acceptance:
-`docs/09-status-and-ratings.md` Decision 1a and
-`docs/recipes/verify-url-entity-identity.md`.
+**Status/rating surface + deterministic URL identity complete:** the scanner
+derives disposable `topping_entities` and `url_entity_aliases` projections
+without conflating them with carrier-file hashes. Normalizer v1 removes only an
+explicit tracking allowlist; a bounded provider adapter converges documented
+Google Maps Search URLs carrying one `query_place_id`. It makes no network
+request and never changes saved URL bytes. Legacy marks migrate only when the
+candidate is empty or semantically identical; a differing owner/status-set
+value retains both inputs and records `state='conflict'`. Renderers and SQL
+filters consume the effective key without per-card hashing. Executable
+acceptance: `docs/recipes/verify-status-and-ratings.md` and
+`docs/recipes/verify-url-entity-identity.md`. Issue #1 remains open for durable
+network/manual evidence, short-link resolution, provider-ID succession, and
+conflict UI.
 
 **Product/architecture clarification recorded (docs only, 2026-07-24):**
 beginner-facing folders become purpose-shaped experiences assembled from
@@ -218,14 +217,11 @@ Engineering contract: `docs/07-catalog.md` Decisions 3–5.
 
 **Next, in agreed order:**
 
-1. **P1 URL/entity identity correctness**: settle the durable alias
-   representation under the existing identity ADR gate, then implement
-   versioned local normalization and high-confidence provider aliases. Preserve
-   raw `.url` files; never perform network I/O during scan; migrate marks
-   without silently collapsing conflicts. Two Google Maps URL variants carrying
-   the same stable Place identity must share status/rating. Full cross-provider
-   clustering remains P3. Design gate:
-   [issue #1](https://github.com/waffle-page/waffle/issues/1).
+1. **P1 URL/entity identity sub-slice B**: under
+   [issue #1](https://github.com/waffle-page/waffle/issues/1), settle durable
+   manual/network alias evidence, short-link resolution, obsolete provider-ID
+   succession, and a conflict-resolution surface. Do not add network work to
+   scan or infer identity from Maps names/coordinates/undocumented blobs.
 2. **P1 usability shell**: repair sticky-Title occlusion and number steppers;
    dismissible transient panels; visible Trash; Activity & Issues for sync/
    operation errors; This folder / All saved search over existing FTS; and the

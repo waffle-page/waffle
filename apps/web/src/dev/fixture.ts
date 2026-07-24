@@ -58,6 +58,19 @@ graph LR
 
   'Trips/masseria-torre.url': `[InternetShortcut]\nURL=https://www.masseriatorremaizza.com/en/rooms\n`,
 
+  // Same documented Google Maps Place ID, deliberately different locale,
+  // query, and tracking noise. Scan must converge their marks without changing
+  // either carrier file (ADR-026).
+  'Trips/lumen-field.url': `[InternetShortcut]\nURL=https://www.google.com/maps/search/?api=1&query=Lumen+Field&query_place_id=ChIJKxjxuaNqkFQR3CK6O1HNNqY\n`,
+
+  'lumen-field-reference.url': `[InternetShortcut]\nURL=https://www.google.es/maps/search/?api=1&utm_source=waffle-fixture&query=47.5952%2C-122.3316&query_place_id=ChIJKxjxuaNqkFQR3CK6O1HNNqY&gclid=fixture\n`,
+
+  // Generic normalization removes only allowlisted tracking noise; the
+  // unknown `edition` parameter remains part of identity.
+  'Trips/tracked-article.url': `[InternetShortcut]\nURL=https://example.com/article?edition=summer&utm_source=trips\n`,
+
+  'tracked-article-reference.url': `[InternetShortcut]\nURL=https://example.com/article?edition=summer&utm_source=root&gclid=fixture\n`,
+
   'Wardrobe/linen-shirt.md': `---
 price: 49
 color: white

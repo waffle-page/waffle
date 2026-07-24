@@ -265,4 +265,28 @@ CREATE INDEX idx_topping_entities_identity
   ON topping_entities(entity_kind, entity_key);
 `,
   },
+  {
+    version: 6,
+    name: 'url_entity_aliases',
+    // ADR-026: exact saved URLs are aliases. Both tables remain disposable
+    // scanner projections; personal marks migrate only when convergence cannot
+    // overwrite a different owner/set value.
+    sql: `
+ALTER TABLE topping_entities ADD COLUMN alias_key TEXT;
+
+CREATE TABLE url_entity_aliases (
+  alias_key          TEXT PRIMARY KEY,
+  entity_key         TEXT NOT NULL,
+  candidate_key      TEXT NOT NULL,
+  normalizer_version INTEGER NOT NULL,
+  provider           TEXT,
+  provider_key       TEXT,
+  evidence           TEXT NOT NULL,
+  state              TEXT NOT NULL CHECK (state IN ('resolved','conflict')),
+  updated_at         TEXT NOT NULL
+);
+CREATE INDEX idx_url_entity_aliases_entity
+  ON url_entity_aliases(entity_key);
+`,
+  },
 ];

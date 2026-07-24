@@ -1,6 +1,7 @@
 /**
- * Personal marks (docs/09): status + rating, keyed to the ENTITY (v1:
- * trimmed-URL hash for links) — one status per set per entity, private always.
+ * Personal marks (docs/09): status + rating, keyed to the resolved ENTITY —
+ * one status per set per entity, private always. Scanner projection is the
+ * authority for a saved topping because it may retain a raw alias on conflict.
  */
 import { fromEavColumns, urlEntityKey } from '@waffle/core';
 import { formatProperty } from '@waffle/ui';
@@ -32,8 +33,13 @@ async function resolveSet(schemaType: string | null): Promise<StatusSet> {
   return { id: row.id, name: row.name, labels: JSON.parse(row.labels) };
 }
 
-export async function loadMarks(url: string, schemaType: string | null): Promise<EntityMarks> {
-  const entityKey = await urlEntityKey(url);
+export async function loadMarks(toppingId: string, url: string, schemaType: string | null): Promise<EntityMarks> {
+  const projected = await platform.db.exec<{ entity_key: string }>(
+    `SELECT entity_key FROM topping_entities
+      WHERE topping_id = ? AND entity_kind = 'url'`,
+    [toppingId],
+  );
+  const entityKey = projected[0]?.entity_key ?? await urlEntityKey(url);
   const set = await resolveSet(schemaType);
   const rows = await platform.db.exec<{ slot: string | null; rating: number | null }>(
     `SELECT slot, rating FROM interactions WHERE owner_id = 'local' AND entity_kind = 'url' AND entity_key = ? AND set_id = ?`,

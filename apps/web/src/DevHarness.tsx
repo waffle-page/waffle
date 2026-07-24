@@ -9,6 +9,7 @@ import { runThumbnailer } from './thumbs/thumbnailer';
 import { seed } from './dev/seed';
 import { runBench, type BenchResult } from './dev/bench';
 import { createFixtureVault } from './dev/fixture';
+import { runUrlIdentityConflictProbe } from './dev/urlIdentityProbe';
 
 interface Status {
   storage: string;
@@ -25,6 +26,15 @@ interface VaultRow {
   folder: string;
   props: number;
   tags: string | null;
+}
+
+interface UrlIdentityRow {
+  title: string;
+  alias_key: string;
+  entity_key: string;
+  provider: string | null;
+  provider_key: string | null;
+  state: 'resolved' | 'conflict';
 }
 
 const card: React.CSSProperties = {
@@ -44,6 +54,8 @@ export function DevHarness() {
   const [bench, setBench] = useState<BenchResult[] | null>(null);
   const [scan, setScan] = useState<ScanResult | null>(null);
   const [vaultRows, setVaultRows] = useState<VaultRow[]>([]);
+  const [urlIdentities, setUrlIdentities] = useState<UrlIdentityRow[]>([]);
+  const [identityProbe, setIdentityProbe] = useState<string | null>(null);
   const [watching, setWatching] = useState(false);
   const [lastEvents, setLastEvents] = useState<string | null>(null);
   const [search, setSearch] = useState('');
@@ -66,6 +78,16 @@ export function DevHarness() {
         FROM toppings t JOIN folders f ON f.id = t.folder_id
         WHERE t.source = 'vault' AND t.deleted_at IS NULL
         ORDER BY f.path, t.title`),
+    );
+    setUrlIdentities(
+      await platform.db.exec<UrlIdentityRow>(`
+        SELECT t.title, a.alias_key, a.entity_key, a.provider, a.provider_key, a.state
+          FROM toppings t
+          JOIN topping_entities te
+            ON te.topping_id = t.id AND te.entity_kind = 'url'
+          JOIN url_entity_aliases a ON a.alias_key = te.alias_key
+         WHERE t.source = 'vault' AND t.deleted_at IS NULL
+         ORDER BY t.title`),
     );
   };
 
@@ -181,6 +203,11 @@ export function DevHarness() {
       setBusy(`external rating ${rating} written — do not scan before testing conflict freeze`);
     });
 
+  const onUrlIdentityConflictProbe = () =>
+    guard('probing URL identity conflict…', async () => {
+      setIdentityProbe(await runUrlIdentityConflictProbe(platform.db, doScan));
+    });
+
   const onMove = () =>
     guard('moving tiramisu…', async () => {
       const fs = await getVaultFs();
@@ -260,6 +287,7 @@ export function DevHarness() {
           <button style={btn} onClick={() => void onWatchToggle()} disabled={!status}>{watching ? '● Watching (stop)' : 'Watch changes'}</button>
           <button style={btn} onClick={onExternalEdit} disabled={!status}>Simulate external edit</button>
           <button style={btn} onClick={onExternalPropertyEdit} disabled={!status}>Simulate property conflict</button>
+          <button style={btn} onClick={onUrlIdentityConflictProbe} disabled={!status}>Probe URL identity conflict</button>
           <button style={btn} onClick={onMove} disabled={!status}>Move tiramisu</button>
         </div>
         {scan && (
@@ -268,6 +296,7 @@ export function DevHarness() {
           </p>
         )}
         {lastEvents && <p style={{ ...dim, margin: '0.4rem 0' }}>watch: {lastEvents}</p>}
+        {identityProbe && <p style={{ color: 'var(--ink-mint)', margin: '0.4rem 0' }}>identity probe: {identityProbe}</p>}
 
         <input
           value={search}
@@ -293,6 +322,30 @@ export function DevHarness() {
               ))}
             </tbody>
           </table>
+        )}
+
+        {urlIdentities.length > 0 && (
+          <>
+            <strong style={{ display: 'block', marginTop: '1rem' }}>URL identity (ADR-026)</strong>
+            <table style={{ width: '100%', borderSpacing: '0 3px', fontSize: '0.8rem' }}>
+              <thead>
+                <tr style={{ ...dim, textAlign: 'left' }}>
+                  <th>title</th><th>provider evidence</th><th>alias</th><th>effective</th><th>state</th>
+                </tr>
+              </thead>
+              <tbody>
+                {urlIdentities.map((row) => (
+                  <tr key={`${row.title}:${row.alias_key}`}>
+                    <td>{row.title}</td>
+                    <td style={dim}>{row.provider_key ? `${row.provider}:${row.provider_key}` : 'normalized URL'}</td>
+                    <td style={{ ...dim, fontFamily: 'monospace' }}>{row.alias_key.slice(0, 8)}</td>
+                    <td style={{ ...dim, fontFamily: 'monospace' }}>{row.entity_key.slice(0, 8)}</td>
+                    <td style={{ color: row.state === 'resolved' ? 'var(--ink-mint)' : 'var(--ink-peach)' }}>{row.state}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </>
         )}
       </div>
 

@@ -50,7 +50,7 @@ redirects or canonical links. Exact rules and false-merge protections:
 `docs/recipes/verify-url-entity-identity.md`.
 
 The global catalog extends that seam rather than inventing another one:
-normalization produces **URL identity** (`url_hash`), then semantic **entity
+normalization produces a versioned **URL alias/entity key**, then semantic **entity
 resolution** clusters different sites pointing at the same thing (a restaurant
 on Google Maps + TripAdvisor + its own site) via type-specific matching keys —
 name+geo for places, GTIN / brand+model for products, oEmbed ID for videos.

@@ -8,7 +8,8 @@ Executable specification for the personal-marks projection in
 
 1. A mark belongs to `(owner, entity, status set)`, never to a topping or
    shared frontmatter property.
-2. A URL entity key hashes the trimmed URL. It is not the `.url` carrier's
+2. A URL alias begins as the trimmed-URL hash, then ADR-026 may resolve it to a
+   deterministic entity key. Neither is the `.url` carrier's
    `toppings.content_hash`.
 3. `topping_entities` is disposable scanner output. Full scan and
    `rescanFile` reconstruct it without changing user files.
@@ -17,8 +18,9 @@ Executable specification for the personal-marks projection in
    corresponding mark does not match, including `is not`.
 6. Frontmatter properties named `rating` or `status` remain independent.
 
-Migration v5 satisfies exact trimmed-URL identity only. Tracking variants,
-short links, and provider aliases are the next correctness slice, specified in
+Migration v6 adds allowlisted tracking normalization and a bounded Google Maps
+Place-ID adapter. Short links, redirects, undocumented provider identifiers,
+and cross-provider clustering remain deferred as specified in
 `verify-url-entity-identity.md`.
 
 ## Fixture exercise

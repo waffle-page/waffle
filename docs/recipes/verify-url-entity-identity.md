@@ -1,12 +1,12 @@
 # Acceptance specification: URL aliases and entity identity
 
-Target contract for the correctness slice after status/rating surfacing. This
-is deliberately executable before implementation so a future agent does not
-mistake generic query stripping for entity resolution.
+Executable contract for ADR-026's deterministic URL-identity slice. It is
+deliberately narrower than generic URL canonicalization: absence of strong
+evidence means separate entities.
 
 ## Scope boundary
 
-Implement same-provider, high-confidence identity for the private library:
+The implemented local pipeline is:
 
 ```text
 raw saved URL → versioned normalized alias → provider key → local entity
@@ -16,6 +16,11 @@ Full semantic clustering across different providers remains P3. For example,
 automatically proving that a restaurant's Google Maps listing and its official
 website are the same entity is out of this slice; an eventual manual **Same
 thing** action may record that relationship earlier.
+
+The Google adapter recognizes only the documented Maps Search URL shape:
+`/maps/search/?api=1&query=…&query_place_id=…`, with exactly one Place ID.
+Directions, CID and `data=!…` blobs, shortened links, redirects, names, and
+coordinates are deliberately not interpreted.
 
 ## Invariants
 
@@ -44,7 +49,8 @@ thing** action may record that relationship earlier.
 | --- | --- |
 | Exact URL saved in two folders | Same |
 | URL differing only by an allowlisted tracking parameter | Same |
-| Two Google Maps long URLs carrying the same Place ID/CID | Same |
+| Two documented Google Maps Search URLs carrying the same `query_place_id` | Same |
+| Two Maps URLs relying only on CID, `data=!…`, name, or coordinates | Separate |
 | Resolved `maps.app.goo.gl` short link and its long URL | Same after explicit online Add/refresh resolution |
 | Unresolved short link during an offline scan | Provisional; scan succeeds without network |
 | Verified successor for an obsolete provider Place ID | Same; former ID remains an alias |
@@ -56,32 +62,47 @@ thing** action may record that relationship earlier.
 
 Use only the fixture vault.
 
-1. Add two `.url` files in different folders for one Google Maps fixture Place:
-   use syntactically different long URLs with the same stable provider ID and
-   tracking noise on one.
-2. Scan. Confirm both toppings project to one entity while both files retain
-   their original URL bytes.
-3. Set a status and rating through one topping. Confirm both toppings update in
+1. Choose **Create fixture vault**, then **Scan vault**. The fixture contains
+   `Trips/lumen-field.url` and root `lumen-field-reference.url`: different
+   locale/query/tracking syntax, one documented Place ID.
+2. In the harness's **URL identity (ADR-026)** table, confirm their alias
+   prefixes differ, effective prefixes match, provider evidence matches, and
+   both rows say `resolved`. Read both files and confirm their original URL
+   bytes are unchanged.
+3. Confirm `tracked-article` and `tracked-article-reference` also have different
+   aliases and one effective key. Their `edition=summer` identity parameter
+   remains in both files; only allowlisted tracking noise was ignored.
+4. Set a status and rating through one topping. Confirm both toppings update in
    masonry, grid, list, table, and saved interaction filters.
-4. Rename/move either carrier file and rescan. Confirm topping reconciliation
+5. Rename/move either carrier file and rescan. Confirm topping reconciliation
    and entity identity remain independent.
-5. Rebuild the disposable index from the fixture vault. Confirm deterministic
+6. Rebuild the disposable index from the fixture vault. Confirm deterministic
    aliases and marks reconstruct.
-6. Exercise an unresolved short link with network disabled. Confirm scan makes
-   no request, reports no error, and retains a provisional identity.
-7. Create two aliases with conflicting existing marks. Run the proposed join
-   operation and confirm both inputs remain recoverable and the conflict is
-   surfaced.
-8. Seed 20,000 toppings and load Everything. Confirm identity resolution occurs
+7. Add an unresolved short link with network disabled. Confirm scan makes no
+   request, reports no error, and assigns only its normalized-URL candidate.
+8. Choose **Probe URL identity conflict**. It constructs and scans a legacy
+   state with different 6/8 marks at the two raw aliases, asserts one
+   `conflict` plus one `resolved` projection and both surviving marks, then
+   restores the clean fixture projection. Confirm the green `passed` report.
+9. Seed 20,000 toppings and load Everything. Confirm identity resolution occurs
    at ingestion/projection boundaries, not once per rendered item.
 
-## Design gate before code
+## Design-gate result
 
-Record the following before changing the scanner or interaction primary key:
+ADR-026 settles deterministic sub-slice A:
 
-- durable local entity and alias representation;
-- normalization-rule version and reprocessing protocol;
-- mark migration and conflict representation;
-- provider-adapter boundary, beginning with Google Maps;
-- explicit online resolution boundary and privacy behavior;
-- interaction with ADR-022 durable vault/folder/topping IDs and encrypted sync.
+- raw files stay canonical; alias/entity tables are rebuildable projections;
+- normalizer version 1 removes only `utm_*`, `gclid`, `dclid`, `fbclid`,
+  `msclkid`, `mc_cid`, `mc_eid`, `_ga`, `_gl`, and `igshid`;
+- unopposed/identical marks migrate; differing owner/set values block the whole
+  alias and retain both identities;
+- a later rule that changes an already-marked shared candidate retains the old
+  effective key for explicit resolution rather than moving shared marks;
+- Google Maps accepts only the documented single-`query_place_id` Search URL;
+- provider matching uses exact Google registrable hosts, never a
+  `google.<anything>` pattern;
+- scan never performs network I/O or emits catalog/location telemetry.
+
+GitHub issue #1 remains open for sub-slice B: durable manual/network evidence,
+short-link resolution, provider-ID succession, conflict UI, and the interaction
+with ADR-022 identity plus encrypted sync.

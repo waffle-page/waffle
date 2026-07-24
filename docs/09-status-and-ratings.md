@@ -19,12 +19,12 @@ later `entity_id`), **not** by topping id. Consequences, all deliberate:
   shelves.
 - You can rate or queue something you've *never saved* (rate straight from the discovery feed, like rating a film on IMDb without listing it).
 - In shared folders, each member's overlay is their own: Marta's "been", your "want to go", on the same place topping — exactly Google Maps shared-list semantics.
-- The v1 entity key for a link hashes the trimmed URL string through one shared
-  helper at mark time and scan time.
+- The v1 bridge keyed a link by the trimmed-URL hash through one shared helper
+  at mark and scan time.
   (`toppings.content_hash` is NOT that hash — it is file-byte identity for the
   scanner's move re-association; a vault link's hash covers its `.url` carrier
   file.) This is an implementation bridge, not the final product identity:
-  URL variants still split today.
+  Migration v6 replaces that bridge with the bounded ADR-026 alias projection.
 
 ## Decision 1a — Saved URLs are aliases, not entity identity
 
@@ -43,11 +43,12 @@ tracking/session parameters, or short-link form differ.
 - Normalization is versioned, local, and performed on add/rescan—not in a
   renderer. Generic rules may normalize syntax and remove an allowlist of known
   tracking parameters; they must never discard every unknown query parameter.
-- Provider adapters extract high-confidence stable keys when available (for
-  example a Google Maps Place ID or CID). Coordinates or similar names alone
-  are insufficient evidence to merge places. Provider keys are not assumed
-  eternal: a verified replacement adds an alias and retains the former key
-  rather than rewriting history.
+- Provider adapters extract high-confidence stable keys when available (the
+  first bounded adapter accepts a documented Google Maps `query_place_id`).
+  Undocumented CID/data blobs, coordinates, or similar names are insufficient
+  evidence in this slice. Provider keys are not assumed eternal: a verified
+  replacement adds an alias and retains the former key rather than rewriting
+  history.
 - Scanning performs no network requests. Redirect resolution and
   `rel=canonical` discovery may run only during an explicit online Add/refresh
   action; an unresolved short link remains a provisional alias.
@@ -117,7 +118,7 @@ protocol above.
   collapse several axes into one misleading scalar.
 - **Add-flow & discovery**: every result carries the overlay — *saved · Read · 8/10 · ★4.3 Amazon · ★7.9 Waffle* — so "have I already read/been/bought this?" is answered at a glance, before saving.
 
-## Schema (migration v2, PK widened by v4)
+## Schema (migration v2, PK widened by v4, aliases added by v6)
 
 ```sql
 status_sets(id, name, labels)                        -- labels: JSON slot→label
@@ -125,15 +126,21 @@ status_set_bindings(set_id, match_kind, match_value) -- 'schema_type'|'tag' → 
 interactions(owner_id, entity_kind, entity_key,      -- entity_kind='url' for now
              set_id, slot, rating, note,             -- PK = (owner, kind, key, set_id)
              status_at, rated_at, updated_at)        --   since v4 (Decision 1b)
-topping_entities(topping_id, entity_kind, entity_key) -- disposable entity↔file projection (v5)
+topping_entities(topping_id, entity_kind, entity_key,  -- disposable effective entity↔file projection
+                 alias_key)                           -- exact saved URL hash (v5, extended v6)
+url_entity_aliases(alias_key, entity_key, candidate_key,
+                   normalizer_version, provider, provider_key,
+                   evidence, state, updated_at)       -- disposable deterministic evidence (v6)
 ```
 
 `topping_entities` is scanner-derived index state. For a `.url`, `entity_key`
-is the hash of the trimmed URL; it is never `toppings.content_hash`, which
-identifies the carrier file's bytes for move reconciliation. This separation
-lets two toppings for the same URL share marks and lets SQL filter overlays
-without hashing every URL during every render. Migration v5 therefore handles
-exact trimmed-URL equality only; the alias/entity hardening above is the next
-correctness slice.
+is the effective ADR-026 entity key; it is never `toppings.content_hash`, which
+identifies the carrier file's bytes for move reconciliation. `alias_key` is the
+former trimmed-URL hash and therefore bridges pre-v6 marks. Generic tracking
+normalization and the documented Google Maps `query_place_id` adapter run
+offline during scan. If convergence would overwrite a different personal mark,
+the alias remains effective and `state='conflict'`. This separation lets URL
+variants share marks and SQL filter overlays without hashing every URL during
+every render.
 
 Local-first like everything else; syncs only to *your own* devices (paid sync tier), never into shared folders. Server-side aggregation consumes contributions, not the table.
