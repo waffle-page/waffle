@@ -286,9 +286,10 @@ Record the commit, browser, spreadsheet application, and fixture topping count.
 - Give a number cell a recognizable value. Type an alphabetic replacement and
   press Enter. The editor must remain open with `aria-invalid` and an inline
   error. Escape; the prior number must remain.
-- Edit ordinary number and money cells. Confirm neither editor exposes browser
-  spinner arrows or changes value through a native stepper; decimal keyboard
-  input and explicit validation still work.
+- Edit ordinary number and money cells, then expose the matching bulk and
+  filter value controls. Confirm none exposes browser spinner arrows or
+  changes value through a native stepper; decimal keyboard input and explicit
+  validation still work.
 - Paste an unrecognized token into a checkbox and invalid text into a
   number/money/date cell. Existing values must remain.
 - Rapidly commit two different properties on the same note, then reload and

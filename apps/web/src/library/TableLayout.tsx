@@ -350,7 +350,8 @@ function TableLayout({ items, groups, folderId = null, crossFolder = false, onOp
                 <input
                   value={bulkRaw}
                   onChange={(e) => setBulkRaw(e.target.value)}
-                  type={bulkColumn.kind === 'number' || bulkColumn.kind === 'money' ? 'number' : bulkColumn.kind === 'date' ? 'date' : 'text'}
+                  type={bulkColumn.kind === 'date' ? 'date' : 'text'}
+                  inputMode={bulkColumn.kind === 'number' || bulkColumn.kind === 'money' ? 'decimal' : undefined}
                   list={bulkColumn.kind === 'select' ? 'bulk-options' : undefined}
                   placeholder={bulkColumn.kind === 'list' ? '["value","value"]' : 'value'}
                   style={{ ...selectStyle, width: 150 }}

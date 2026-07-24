@@ -231,13 +231,17 @@ identifier. Sparse cells roll up or stay hidden. Exact location may improve
 ranking locally without leaving the device. Engineering contract:
 `docs/07-catalog.md` Decisions 3–5.
 
+**P1 table hardening shipped (2026-07-24):** sticky Title surfaces remain
+opaque across horizontal scroll and selection states. Numeric cell, bulk, and
+filter editors use decimal text input with explicit validation rather than
+undeclared native steppers.
+
 **Next, in agreed order:**
 
-1. **P1 usability shell**: repair sticky-Title occlusion and number steppers;
-   dismissible transient panels; visible Trash; Activity & Issues for sync/
-   operation errors; This folder / All saved search over existing FTS; and the
-   responsive bottom-right Add capture sheet. Preserve table ghost-row and all
-   interaction regressions.
+1. **P1 usability shell**: dismissible transient panels; visible Trash;
+   Activity & Issues for sync/operation errors; This folder / All saved search
+   over existing FTS; and the responsive bottom-right Add capture sheet.
+   Preserve table ghost-row and all interaction regressions.
 2. **Settings + durable object identity**: theme palette plus
    locale/timezone/week-start/unit/
    currency preferences; then durable vault/folder/topping identity under

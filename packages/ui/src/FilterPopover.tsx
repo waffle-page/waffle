@@ -157,8 +157,8 @@ export function FilterPopover({ fields, conditions, filtersReadOnly = false, gro
                 value={r.raw}
                 onChange={(e) => setRow(i, { raw: e.target.value })}
                 onKeyDown={(e) => e.key === 'Enter' && apply()}
-                type={kind === 'number' || kind === 'money' || kind === 'duration' ? 'number' : kind === 'date' ? 'date' : 'text'}
-                inputMode={kind === 'interaction-rating' ? 'decimal' : undefined}
+                type={kind === 'date' ? 'date' : 'text'}
+                inputMode={kind === 'number' || kind === 'money' || kind === 'duration' || kind === 'interaction-rating' ? 'decimal' : undefined}
                 placeholder="value"
                 style={{ ...ctl, flex: 1, minWidth: 0 }}
               />
