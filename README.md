@@ -57,6 +57,7 @@ pnpm dev        # opens the app; ?dev = dev-spine harness (seed 20k toppings, be
 | [docs/12-notes-as-rows.md](docs/12-notes-as-rows.md) | The user-tables doctrine |
 | [docs/13-experiences-and-suggestions.md](docs/13-experiences-and-suggestions.md) | Mini-app experiences, contextual suggestions, Add, search |
 | [docs/14-identity-sync-and-encryption.md](docs/14-identity-sync-and-encryption.md) | Durable identity, optional accounts, E2EE sharing, large-vault restore |
+| [docs/15-connector-driven-experiences.md](docs/15-connector-driven-experiences.md) | Contacts→CRM and Oura→Sleep Dashboard reference flows |
 | [docs/recipes/](docs/recipes/) | How to add a property type, a renderer, … |
 
 ## Monorepo layout

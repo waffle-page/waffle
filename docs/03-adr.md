@@ -101,3 +101,14 @@ Suggestions are inert until accepted; accepted output belongs to the user and
 never silently tracks later inference. The advanced escape hatch is **+ Custom
 view**. Folder/view/List choice, Add, search scopes, and privacy rules are in
 docs/13.
+
+## ADR-025 — Connector suggestions are host-matched declarations
+Connectors may declare canonical outputs, coarse intent hints, and bundled
+experience recipes in their manifests; they never inspect folder names,
+library rows, notes, or other datasets to decide what to suggest. The trusted
+host matches manifest metadata to an on-device folder profile and materializes
+accepted recipes. Entity sources (Contacts) use field-owned file
+materialization; time-series sources (Oura) use canonical datasets. Source
+deletion flags rather than deletes, while a user's soft-delete creates a
+suppression tombstone so later pulls cannot resurrect it. Full reference flows:
+docs/15.

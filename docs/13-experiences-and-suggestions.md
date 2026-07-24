@@ -56,6 +56,10 @@ a map/filter rather than another folder; “Summer clothes” is a Wardrobe view
 - An explicit catalog/web search may send the query the user entered. Remote
   candidate pools may use coarse type + locale; final private-context ranking
   happens on-device.
+- Connector manifests may declare coarse intent hints and bundled recipes. The
+  trusted host matches them locally (for example, Wellness + Oura → Sleep
+  Dashboard); connector code never receives folder/library context. See
+  `15-connector-driven-experiences.md`.
 - A suggestion is inert until accepted. Moving existing items requires a clear
   summary and confirmation; the resulting operation offers Undo.
 - Dismissal is respected. Waffle does not repeatedly ask the same question.
@@ -120,6 +124,39 @@ Starting inside a folder defaults to **This folder**. The scope is always
 visible. Mobile opens a full-screen search sheet; desktop also exposes
 Cmd/Ctrl+K. Catalog results show saved/status/rating overlays so users do not
 re-add what they already have.
+
+## Shell, feedback, and recovery contract
+
+The shell must explain state without occupying the workspace permanently:
+
+| Situation | Beginner-facing behavior |
+| --- | --- |
+| Successful/reversible action | Brief toast with **Undo** where supported |
+| Background import, connector pull, sync, thumbnail, or bulk operation | Compact progress in **Activity & Issues**; its panel is always dismissible |
+| Actionable warning/failure | Persistent issue badge and grouped detail with retry/open-source-file actions |
+| Irreversible, security-sensitive, or unusually large action | Responsive app dialog/sheet; never a browser-native `confirm()` |
+
+Obsidian sync reports belong in Activity & Issues, not in an immortal side tab
+or a generic warning banner. The same center owns connector freshness,
+permissions, offline/unsynced state, and operation failures while preserving
+source-specific detail.
+
+**Trash** is a visible navigation destination. The user-facing verb is **Move
+to Trash**, never “move to `.trash`”; `.trash/` is an implementation path.
+Ordinary soft deletion should complete with Undo instead of requiring a modal.
+Confirmation is reserved for a large/ambiguous selection or a state that cannot
+be recovered normally. Restore and empty-trash are explicit actions.
+
+Small but binding table polish belongs in the same P1 hardening slice:
+
+- The sticky Title column and header cells paint an opaque semantic background,
+  stacking boundary, and edge divider/shadow; scrolled columns never bleed
+  underneath.
+- Ordinary number cells do not expose browser spinner arrows. Locale-aware
+  parsing/formatting comes from Settings; explicit stepping appears only for a
+  property that declares a meaningful step.
+- Operation/detail panels, including the current table-operations surface, are
+  closable and do not steal permanent width from the library.
 
 ## Renderer implications
 

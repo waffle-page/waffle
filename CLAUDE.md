@@ -13,10 +13,12 @@ day; every change is reviewed against that, not against taste.
 5. Before product-shell, identity, account, sync, sharing, or discovery work:
    `docs/13-experiences-and-suggestions.md` and
    `docs/14-identity-sync-and-encryption.md`.
-6. Other per-area specs as needed: `docs/12` (tables/notes-as-rows), `docs/10`
+6. Before connector/materialization or connector-driven suggestion work:
+   `docs/05-connector-sdk.md` and `docs/15-connector-driven-experiences.md`.
+7. Other per-area specs as needed: `docs/12` (tables/notes-as-rows), `docs/10`
    (link details), `docs/09` (status/ratings), `docs/05`–`07` (connectors,
    schemas, catalog).
-7. `docs/recipes/` — how to extend each seam. Update the recipe in the same PR that changes a seam.
+8. `docs/recipes/` — how to extend each seam. Update the recipe in the same PR that changes a seam.
 
 ## The invariants that must never break
 
@@ -184,6 +186,14 @@ explicitly local-only or external-provider references. Durable identity,
 device keys, recovery, rekeying, conflict copies, remote-only scanner
 semantics, quota failure, and restore gates: `docs/14-identity-sync-and-encryption.md`.
 
+Connector-driven experiences preserve the sandbox: manifests declare schemas,
+coarse intent hints, and versioned recipes; the host matches them to folder
+context locally. Contacts materialize field-owned notes and CRM views; Oura
+writes canonical health datasets and can scaffold a Sleep Dashboard. Source
+deletion never deletes an annotated note, and user trash creates a suppression
+tombstone so the connector cannot resurrect it. Reference flows:
+`docs/15-connector-driven-experiences.md`.
+
 **Next, in agreed order:**
 
 1. **Finish the existing P1 semantic surface**: status/ratings chips +
@@ -204,6 +214,10 @@ semantics, quota failure, and restore gates: `docs/14-identity-sync-and-encrypti
    suggestions first, then catalog sources/pins plus Map, Calendar, and
    editable Timeline. Public links retain the crawler-fetchable preview
    contract in `docs/04`.
+6. **Connector experiences**: when the SDK/materialization seam is next
+   implemented, use Contacts→CRM and Oura→Sleep Dashboard as its two acceptance
+   references (`docs/15`). The connector store still opens in P3; first-party
+   packages dogfood the exact same contract earlier.
 
 Known deferred gaps (each states its owner): link/file properties
 (`.waffle/meta.json`, ADR-013), the current path/index-only identity limitation

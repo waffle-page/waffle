@@ -1,6 +1,10 @@
 # Connector SDK & Store
 
-Connectors bring external data into datasets. They are signed, sandboxed, open-source packages; the store is public infrastructure. Design goal: Oura could build and publish the Oura connector without talking to us.
+Connectors bring external data into datasets or materialized topping files.
+They are signed, sandboxed, open-source packages; the store is public
+infrastructure. Design goal: Oura could build and publish the Oura connector
+without talking to us. Contacts→CRM and Oura→Sleep Dashboard are the reference
+flows in `15-connector-driven-experiences.md`.
 
 ## Package anatomy
 
@@ -21,6 +25,12 @@ Connectors bring external data into datasets. They are signed, sandboxed, open-s
   "templates": ["sleep-dashboard.dash"]     // bundled suggested dashboards
 }
 ```
+
+The eventual manifest also declares coarse, non-executable experience hints
+and versioned recipe metadata. The trusted host matches them to an on-device
+folder profile; connector code never receives folder/library context
+(ADR-025). Freeze the exact manifest keys with the SDK implementation rather
+than treating this illustrative manifest as its final schema.
 
 Plus one bundled TypeScript ESM module implementing:
 
@@ -65,7 +75,11 @@ Because the manifest declares schema *and* bundles `.dash` templates, install �
 
 ## First-party dogfooding
 
-Home Assistant, HealthKit, CSV/file-import, and GoCardless connectors are built as store packages that ship pre-installed. Built-ins eat the same API as third parties (VS Code discipline) — by the time the store opens, the SDK has months of production use.
+Home Assistant, HealthKit, Oura, Contacts, CSV/file-import, and GoCardless
+connectors are built as store packages that ship pre-installed or as
+first-party reference packages. Built-ins eat the same API as third parties
+(VS Code discipline) — by the time the store opens, the SDK has months of
+production use.
 
 ## Topping-materializing connectors (ADR-018)
 
@@ -81,6 +95,9 @@ ownership on a shared file**:
   files even after renames.
 - Deletions flag (`source_status: removed`), never delete — user annotations
   are sacred.
+- A user soft-deleting a linked note records a source-entity suppression
+  tombstone; subsequent pulls cannot resurrect it. Restore clears suppression;
+  **Keep as Waffle contact** detaches source ownership.
 - Direction starts one-way (source → Waffle); write-back is a later,
   per-field decision.
 
@@ -89,6 +106,12 @@ only, on-device, categorically excluded from catalog and community features.
 First implementations: vCard import (one-shot, near-free), then macOS
 Contacts (native shells) and Google People (OAuth broker). Calendar and
 browser bookmarks want the same mode later.
+
+Connector-owned fields are visibly linked/read-only in v1; editing them opens
+the source application. The markdown body, Waffle tags/status/custom fields,
+and backlink history remain user-owned. Stable source identity, idempotent
+pulls, ambiguous multi-source matches, and the CRM recipe are specified in
+docs/15.
 
 ## Later extensions of the same machinery
 

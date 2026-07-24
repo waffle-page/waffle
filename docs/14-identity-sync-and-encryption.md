@@ -22,6 +22,18 @@ rows or objects a session may request. Neither grants Supabase plaintext access:
 authorization is defense in depth; client-held encryption keys are the privacy
 boundary.
 
+When sharing exists, navigation projects these states in plain language:
+
+- **Shared with me**: folders owned by another account where this member has a
+  grant.
+- **Shared with others**: folders this account/workspace owns and has shared.
+- Published links are managed separately from collaboration because publishing
+  creates a public projection, not another member grant.
+
+These destinations appear when relevant rather than permanently cluttering an
+accountless/local-only shell. They are query projections over identity/grants,
+not special folder storage models.
+
 ## Durable identity is a gate, not a later migration
 
 The v1 scanner currently derives folder IDs from paths and creates topping
@@ -42,6 +54,28 @@ Before any network feature depends on identity:
 
 The exact `.waffle/` file layout and offline-rename ambiguity procedure must be
 settled in the implementation ADR before changing the scanner.
+
+### Duplication and large local libraries
+
+Waffle imposes no arbitrary topping-count limit on a local vault. Performance
+budgets and available disk are the constraints; managed-service billing remains
+byte-based. Internal object/operation safeguards may protect the service
+without becoming a user-facing per-topping meter.
+
+Duplicating one topping or a selected set creates new durable IDs and ordinary
+canonical files; copies never alias the originals. A request to duplicate tens
+of thousands of items is a visible long-running operation, not a synchronous
+UI gesture or one giant in-memory transaction:
+
+- Preview item count, estimated bytes, destination, and name collisions before
+  starting; require confirmation beyond a measured large-operation threshold.
+- Write each destination file, `rescanFile` it, and requery at bounded batch
+  boundaries. Never bulk-insert the SQLite mirror.
+- Report progress and truthful partial completion; cancellation stops future
+  copies and does not erase completed files.
+- Persist an operation manifest/receipt so cleanup can soft-delete exactly the
+  created IDs. Do not place an unbounded 50,000-file inverse inside session
+  undo history.
 
 ## End-to-end encrypted personal and shared state
 

@@ -56,3 +56,10 @@ becomes a folder of contact notes. The CRM assembles from existing rails —
 `Person`-bound status set (reach out → in conversation → met), relation
 properties (contact → company), and backlinks-as-interaction-timeline (every
 meeting note mentioning [[Name]] is that contact's history, free).
+
+Source fields and the user's dossier do not fight: name/phone/email/address are
+connector-owned and visibly linked; body/tags/status/custom properties remain
+user-owned. A source deletion flags the note, while a user deletion suppresses
+future rematerialization. The complete Apple/Google Contacts reconciliation,
+identity, duplicate-source, and CRM experience contract is
+`15-connector-driven-experiences.md`.
